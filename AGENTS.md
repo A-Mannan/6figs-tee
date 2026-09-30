@@ -187,10 +187,13 @@ This repo uses OpenSpec (skills in `.agents/skills/openspec-*`, root at
 - `openspec/changes/integration-product/` — wiring tee into the Next.js frontend
   and NestJS backend (packaging, session-bound nonces, TeeModule, prove flow).
   All tasks pending; start at Phase 0 in `tee/`. App work goes on feature
-  branches only, never `main` of either app repo. Resume at its `tasks.md`.
+  branches only, never `main` of either app repo. Resume at its `tasks.md`;
+  check its `## Blockers` first (tier mapping, no-totals UI, enclave hosting,
+  branch coordination all need decisions/provisioning outside this repo).
 - `openspec/changes/harden-phase-3/` — leftover audit hardening (blind OPRF,
   signed price feed, threshold transitions, HA runbook). All tasks pending;
-  do not start until integration Phase 0 ships.
+  do not start until integration Phase 0 ships. Its `## Blockers` lists the
+  KMS, feed-vendor, review, and infra dependencies.
 - `openspec/changes/harden-phase-2/` — fully implemented (19/19 tasks,
   82/82 tests) and awaiting archive. `harden-verification-and-limits/`
   likewise complete (19/19) and awaiting archive.

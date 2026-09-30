@@ -3,6 +3,26 @@
 > Resume here: everything below is pending. Start at Phase 0 in `tee/`; do not
 > touch app repos until Phase 0 is tagged. App work happens on feature branches
 > only — never push to `main` of `6FIGS.XYZ_frontend` or `6FIGS.XYZ_backend`.
+> Read `## Blockers` before starting: several items below cannot proceed until
+> someone outside this repo decides or provisions something.
+
+## Blockers
+
+- [ ] B1 Product decision (owner: you) — approve the 4→3 tier mapping (tee ids
+  1→I, 2–3→II, 4→III) or specify an alternative. Blocks Phase 1 merge; the
+  mapping changes backend tier writes and room-gating copy.
+- [ ] B2 Product decision (owner: you) — approve the no-totals profile redesign
+  (`total`/`balances` disappear for tee-verified users). Blocks Phase 2 UI work;
+  the `teeVerify` lib itself (2.1) can proceed regardless.
+- [ ] B3 Infrastructure (owner: enclave operator) — no production enclave is
+  deployed. Phase 1/2 integration testing runs against local mock attestation
+  only until a VM exists with a published URL, a pinned digest for both app
+  configs, and a `SIXFIGS_NULLIFIER_KEY` provisioning story.
+- [ ] B4 Coordination (owner: Ibrahim) — app work lives in his repos. Agree on
+  feature-branch names and the review/merge process before Phase 1/2 start.
+- [ ] B5 Data policy (owner: you) — confirm scope is wealth-linkage only:
+  login still reveals addresses, and `addressEnc` retirement follows a
+  retention decision, not this change.
 
 ## 0. Tee-side prerequisites (this repo)
 

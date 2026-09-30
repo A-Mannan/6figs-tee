@@ -2,6 +2,16 @@
 
 > Resume here: everything below is pending future work. Do not start until the
 > integration-product Phase 0 ships, since several items depend on its packaging.
+> Read `## Blockers` before starting: every group below waits on something
+> outside this repo.
+
+## Blockers
+
+- [ ] B1 Infrastructure — no KMS or equivalent exists. Blind OPRF needs a key-management home first; the keyed-HMAC scheme stays production until then.
+- [ ] B2 Vendor/product — no signed feed provider chosen (Chainlink vs Pyth) and no subscription; without it the feed work cannot start.
+- [ ] B3 Review — the threshold-transition risk model needs explicit product + security sign-off (task 3.1); implementation waits on it.
+- [ ] B4 Infrastructure — single VM today. HA needs a second instance plus load-balancer config owned by the enclave operator.
+- [ ] B5 Sequencing — do not start this change until integration-product Phase 0 ships.
 
 ## 1. Blind OPRF nullifiers
 
