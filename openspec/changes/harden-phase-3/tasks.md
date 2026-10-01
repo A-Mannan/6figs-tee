@@ -7,7 +7,7 @@
 
 ## Blockers
 
-- [ ] B1 Infrastructure — no KMS or equivalent exists. Blind OPRF needs a key-management home first; the keyed-HMAC scheme stays production until then.
+- [ ] B1 Infrastructure — no KMS or equivalent exists. Blind OPRF needs a key-management home first; the keyed-HMAC scheme stays production until then. The same KMS gates the production escrow key required by integration-product (only the attested image may decrypt addresses).
 - [ ] B2 Vendor/product — no signed feed provider chosen (Chainlink vs Pyth) and no subscription; without it the feed work cannot start.
 - [ ] B3 Review — the threshold-transition risk model needs explicit product + security sign-off (task 3.1); implementation waits on it.
 - [ ] B4 Infrastructure — single VM today. HA needs a second instance plus load-balancer config owned by the enclave operator.

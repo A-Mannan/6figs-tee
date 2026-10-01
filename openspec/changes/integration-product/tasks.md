@@ -1,51 +1,69 @@
 # Tasks
 
-> Resume here: everything below is pending. Start at Phase 0 in `tee/`; do not
-> touch app repos until Phase 0 is tagged. App work happens on feature branches
-> only — never push to `main` of `6FIGS.XYZ_frontend` or `6FIGS.XYZ_backend`.
-> Read `## Blockers` before starting: several items below cannot proceed until
-> someone outside this repo decides or provisions something.
+> Resume here. Work tee-first, then the backend branch, then the frontend
+> branch. App work happens on feature branches only — never push to `main` of
+> `6FIGS.XYZ_frontend` or `6FIGS.XYZ_backend`. Read `## Blockers` first.
 
 ## Blockers
 
-- [ ] B1 Product decision (owner: you) — approve the 4→3 tier mapping (tee ids
-  1→I, 2–3→II, 4→III) or specify an alternative. Blocks Phase 1 merge; the
-  mapping changes backend tier writes and room-gating copy.
-- [ ] B2 Product decision (owner: you) — approve the no-totals profile redesign
-  (`total`/`balances` disappear for tee-verified users). Blocks Phase 2 UI work;
-  the `teeVerify` lib itself (2.1) can proceed regardless.
-- [ ] B3 Infrastructure (owner: enclave operator) — no production enclave is
-  deployed. Phase 1/2 integration testing runs against local mock attestation
-  only until a VM exists with a published URL, a pinned digest for both app
-  configs, and a `SIXFIGS_NULLIFIER_KEY` provisioning story.
-- [ ] B4 Coordination (owner: Ibrahim) — app work lives in his repos. Agree on
-  feature-branch names and the review/merge process before Phase 1/2 start.
-- [ ] B5 Data policy (owner: you) — confirm scope is wealth-linkage only:
-  login still reveals addresses, and `addressEnc` retirement follows a
-  retention decision, not this change.
+Resolved by the product pull and owner direction (2026-10-01):
 
-## 0. Tee-side prerequisites (this repo)
+- [x] B1 Tier mapping — product now ships four tiers (I $100k / II $300k /
+  III $500k / IV $1M), matching tee ids 1–4 one-to-one. No collapse.
+- [x] B2 UI direction — tier + top-3 assets, no totals, percentages, or
+  progress bars; no base64 address at rest.
+- [x] B3 Dev enclave — live at `http://35.238.114.34:8080` (us-central1-c),
+  digest `sha256:5faa8039…64aa7`, real attestation, keyed nullifiers.
+- [x] B4 Branching — owner authorized feature-branch work in both app repos;
+  still have Ibrahim review/merge.
+- [x] B5 Address policy — no plaintext/base64 addresses; escrow ciphertext
+  only, tee-only decrypt.
 
-- [x] 0.1 Add `tsc` build emitting `dist/` with `package.json` exports for `./client`, `./verifier`, `./shared`; verify by importing all three subpaths from a scratch NestJS-style `tsc` project and a Next.js-style webpack build (webpack half deferred: no npm registry in this environment, so verified via NodeNext tsc + node ESM through the exports map instead; the real Next.js build in Phase 2 is the final proof)
-- [x] 0.2 Accept optional `nonce` in client `prepare()` input and echo it into the request; verify by a test asserting a caller nonce round-trips into `body.nonce`
-- [x] 0.3 Add a shared tee-tier-id → product-tier-label helper used by both apps; verify by unit test covering ids 0–4
-- [x] 0.4 Pin the dependency as `github:A-Mannan/6figs-tee#<tag-sha>` in docs; verify by fresh `npm install` resolving byte-identical code
+Launch gates (do not block dev; block production):
 
-## 1. Backend TeeModule (feature branch `tee-integration`, never `main`)
+- [ ] G1 KMS-bound escrow key: production escrow key must be released only to
+  the attested image. Dev uses `SIXFIGS_ESCROW_KEY` via tee-env.
+- [ ] G2 Mailer for password reset/verification before public signups.
+- [ ] G3 Production enclave hosting/fleet (separate from the dev VM).
 
-- [ ] 1.1 Add Prisma models `TeeIdentity`, `TeeWalletBinding` mirroring `tee/db/schema.sql` plus `User.identityNullifier`; verify by `prisma validate` and a migration that applies cleanly
-- [ ] 1.2 Implement the Prisma `NullifierStore` with single-transaction `runTransaction` semantics; verify by porting the tee store conformance cases (bind conflict, migration, concurrent transitions)
-- [ ] 1.3 Add authenticated `POST /eligibility/tee-nonce` (Redis single-use, short TTL) and `POST /eligibility/tee-verify` (expectedNonce + persist + link identity); verify by an authenticated happy-path test and a replayed-nonce rejection test
-- [ ] 1.4 Map tee tiers to product tiers into `EligibilityCache` and stop `addressEnc` writes plus live balance reads for tee-verified users; verify by a test asserting no balance RPC occurs on the tee path
+## 0. Tee protocol additions (this repo)
 
-## 2. Frontend tee flow (feature branch `tee-integration`, never `main`)
+- [x] 0.1 `tsc` build emitting `dist/` with `./client`, `./verifier`, `./shared` exports; verified via NodeNext consumer + live smoke. Webpack half deferred to the real Next build in Phase 2.
+- [x] 0.2 Optional `nonce` in client `prepare()`; verified by round-trip test into `body.nonce`.
+- [ ] 0.3 Identity tier mapping: update `productTierLabel` to 1→I … 4→IV; add dev tiers (10/100/500/1000 USD) when `SIXFIGS_DEV_CHAINS=1`; verify by unit tests for both modes
+- [ ] 0.4 Add `topAssets` (≤3 sanitized symbols, ≥5% share) to the signed result and verifier validation; verify by tests covering ordering, floor, sanitization, and body acceptance
+- [ ] 0.5 Escrow keypair in the key manager from `SIXFIGS_ESCROW_KEY`, advertised in `/hello` and bound into the key attestation nonce; verify by tests for hello binding, substitution rejection, and explicit recheck refusal without persistent material
+- [ ] 0.6 `POST /recheck`: decrypt escrow blob, enforce `expectedIdentityNullifier`, re-fetch balances/prices, sign an attested result bound to the nonce; verify by tests for success, identity mismatch, and missing-key refusal
+- [ ] 0.7 Client helpers: `encryptEscrowBlob()` plus a Node-safe `RecheckClient` used by the backend (hello pinning + envelope + result verification); verify by tests with a stub enclave
+- [ ] 0.8 Bump `POLICY_VERSION`, update docs (`ATTESTATION.md`, `INTEGRATION.md`, `SECURITY.md` privacy invariants); verify by verifier rejecting the old version
+- [ ] 0.9 Rebuild the dev image, recreate the dev VM, and smoke tier + top-3 + recheck against real attestation (`scripts/smoke-enclave.ts`); verify by recorded smoke output
+- [x] 0.10 Document the pinned git dependency and release tag process (`docs/INTEGRATION.md`).
 
-- [ ] 2.1 Add `src/lib/teeVerify.ts` wrapping `RegistrationClient` with the wallet adapter signer; verify by a mocked-adapter test driving prepare → sign → submit
-- [ ] 2.2 Wire the profile "prove" button and wallet add/remove re-proof to the backend nonce endpoints; verify by an end-to-end devnet run against mock attestation
-- [ ] 2.3 Redesign profile/eligibility display to tier-only (no totals, no per-wallet amounts, no progress bar); verify by rendering tests and grep proving no `eligibility.total` readers remain
-- [ ] 2.4 Add enclave policy env (`NEXT_PUBLIC_ENCLAVE_URL`, digest, project); verify by a boot check failing closed on missing config
+## 1. Backend branch (`6FIGS.XYZ_backend`, feature branch)
 
-## 3. Later (separate changes, not this one)
+- [ ] 1.1 Prisma models `TeeIdentity` (tier, tierLabel, portfolioBand, stableBps, topAssets, policyVersion, escrowBlob, verifiedAt, expiresAt) and `TeeWalletBinding`, plus `User.email`/`User.passwordHash`; verify by `prisma validate` and a clean migration on dev
+- [ ] 1.2 Email auth: signup/login with scrypt via `node:crypto`, rate-limited, same JWT; update `AuthModule`; verify by tests for hash format, duplicate email, bad credentials, and rate limit
+- [ ] 1.3 Redis-backed single-use nonces for tee registration/recheck bound to the session; verify by happy path and replay rejection
+- [ ] 1.4 TeeModule: verify `SignedRegistration` with `expectedNonce`, persist tier/topAssets/escrowBlob/bindings transactionally, link to user; verify by porting tee store conformance tests (bind conflict, transition, concurrent submits)
+- [ ] 1.5 TTL re-verifier: `RecheckClient` call, per-identity Redis lock, update on success, fail closed at expiry, `stale` flag while fresh; verify by tests with a stub enclave for success, outage, and expiry
+- [ ] 1.6 Read paths: profile/eligibility return tier, band, top-3 symbols, wallet labels — no totals/percentages; stop `addressEnc` writes for tee wallets; verify by response-shape tests and a grep proving no `eligibility.total`/`balances` readers remain in the tee path
+- [ ] 1.7 Legacy compatibility: wallet-signature login keeps working; email link preserves the account; rooms gate on mapped labels incl. TIER IV; verify by migration test and room-gate test
+- [ ] 1.8 Full backend verification: `npm run typecheck`, `npm run build`, `npm run lint`, `npm test`
 
-- [ ] 3.1 EVM wallets: wagmi integration in frontend, chain support in backend auth, tee already supports EVM; verify per-wallet-family tests
-- [ ] 3.2 Retire `addressEnc` for login routing and legacy eligibility rows per retention policy; verify by schema migration and dead-code grep
+## 2. Frontend branch (`6FIGS.XYZ_frontend`, feature branch)
+
+- [ ] 2.1 Email signup/login UI and session handling; verify by a mocked-API test and manual dev run
+- [ ] 2.2 `src/lib/teeVerify.ts`: session nonce fetch, `RegistrationClient` wrap, escrow blob creation from `/hello`, result POST; verify by a mocked-adapter test driving nonce → prepare → sign → submit → POST
+- [ ] 2.3 Prove/re-prove UI with per-wallet progress and decline handling; verify by rendering tests for success, partial, and declined states
+- [ ] 2.4 Guided add/remove wallet flow (single modal, all-wallets signing, fresh escrow blob); verify against the dev enclave end-to-end
+- [ ] 2.5 Profile redesign: tier badge, band, top-3 symbols, wallet labels, silent refresh, stale marker; verify by rendering tests and a grep proving no total/percentage readers remain
+- [ ] 2.6 Tier-IV copy/gating in rooms and any tier lists; verify by rendering test
+- [ ] 2.7 Enclave policy env (`NEXT_PUBLIC_ENCLAVE_URL`, digest, project) with a boot check that fails closed on missing config; verify by the check rejecting empty config
+- [ ] 2.8 Full frontend verification: `npm run typecheck`, `npm run build`, `npm run lint`
+
+## 3. Cutover and handoff
+
+- [ ] 3.1 Tag the tee release and pin it in both app branches; verify by fresh `npm install` resolving the same commit
+- [ ] 3.2 Open PRs on `tee-integration` branches for Ibrahim's review; never target `main`
+- [ ] 3.3 Record the dev VM digest/URL in both app PRs and in `docs/DEV-ENCLAVE.md`; verify by a live smoke run
+- [ ] 3.4 Decide `addressEnc` retention/migration for legacy rows and file it as a follow-up change; verify by a written decision in the PR

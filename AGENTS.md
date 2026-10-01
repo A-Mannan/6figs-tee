@@ -74,13 +74,16 @@ Read `docs/ATTESTATION.md` for the exact nonce and claim mechanics.
 ## Privacy invariants (do not break)
 
 - The backend may store an identity nullifier, a tier, `portfolioBand`,
-  `stableBps`, and wallet nullifiers. Nothing else.
-- Never add a column, DTO field, or log line that can carry an address, a
-  balance, a token amount, or an exact total.
-- The stablecoin share (`stableBps`) is intentionally disclosed. Everything
-  else about the portfolio is gated by the request's `disclosure` mode:
-  `hidden` sends no allocation, `category` sends bucketed bps, `full` may carry
-  more.
+  `stableBps`, wallet nullifiers, the disclosed `topAssets` symbols, and the
+  escrow blob (ciphertext only the enclave can decrypt). Nothing else.
+- Never add a column, DTO field, or log line that can carry a plaintext or
+  base64url address, a balance, a token amount, or an exact total. The escrow
+  blob is the only address-bearing value that may rest outside the enclave,
+  and it is opaque to everyone but the enclave.
+- The stablecoin share (`stableBps`) and up to three `topAssets` symbols are
+  intentionally disclosed. Amounts never are. Everything else about the
+  portfolio is gated by the request's `disclosure` mode: `hidden` sends no
+  allocation, `category` sends bucketed bps, `full` may carry more.
 - Nullifiers are one-way. `walletNullifier = SHA-256("6figs-wallet-v1"|family|address)`
   (`legacy-v1`), or `HMAC(key, "6figs-wallet-v2"|family|address)` when
   `SIXFIGS_NULLIFIER_KEY` is provisioned (`keyed-v1`, required in production);
@@ -185,11 +188,13 @@ This repo uses OpenSpec (skills in `.agents/skills/openspec-*`, root at
 ## Active work
 
 - `openspec/changes/integration-product/` — wiring tee into the Next.js frontend
-  and NestJS backend (packaging, session-bound nonces, TeeModule, prove flow).
-  All tasks pending; start at Phase 0 in `tee/`. App work goes on feature
-  branches only, never `main` of either app repo. Resume at its `tasks.md`;
-  check its `## Blockers` first (tier mapping, no-totals UI, enclave hosting,
-  branch coordination all need decisions/provisioning outside this repo).
+  and NestJS backend. Current scope: four-tier identity mapping, `topAssets`
+  disclosure, email accounts, encrypted address escrow with hourly recheck,
+  and a tier + top-3 profile. Phase 0 packaging/nonce work is done; protocol
+  additions, backend branch, and frontend branch remain. Resume at its
+  `tasks.md`; read `## Blockers` first (dev gates resolved; production gates
+  are KMS-bound escrow key and a mailer). App work goes on feature branches
+  only, never `main` of either app repo.
 - `openspec/changes/harden-phase-3/` — leftover audit hardening (blind OPRF,
   signed price feed, threshold transitions, HA runbook). All tasks pending;
   do not start until integration Phase 0 ships. Its `## Blockers` lists the
