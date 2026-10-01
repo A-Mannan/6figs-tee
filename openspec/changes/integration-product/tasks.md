@@ -63,7 +63,7 @@ Launch gates (do not block dev; block production):
 
 ## 3. Cutover and handoff
 
-- [ ] 3.1 Tag the tee release and pin it in both app branches; verify by fresh `npm install` resolving the same commit
+- [x] 3.1 Tagged the tee release (`tee-integration-v1` → `75cb61b`); both apps pin the dist-identical commit `b94e177` (`github:A-Mannan/6figs-tee#b94e177`, verified byte-identical `src`/`dist` to the tag). Fresh `yarn install --frozen-lockfile` resolves it via the lockfile tarball (note: yarn 1.x tag refs need `raw.githubusercontent.com`, unreachable from some networks — prefer the sha pin until the registry move)
 - [ ] 3.2 Open PRs on `tee-integration` branches for Ibrahim's review; never target `main`
 - [ ] 3.3 Record the dev VM digest/URL in both app PRs and in `docs/DEV-ENCLAVE.md`; verify by a live smoke run
 - [ ] 3.4 Decide `addressEnc` retention/migration for legacy rows and file it as a follow-up change; verify by a written decision in the PR
