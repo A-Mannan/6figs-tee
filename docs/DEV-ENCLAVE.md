@@ -61,10 +61,15 @@ set -a; source .env.dev; set +a
 SIXFIGS_VM_PROJECT=sixfigs \
 SIXFIGS_WORKLOAD_PROJECT=sixfigs \
 SIXFIGS_ARTIFACT_REPOSITORY=tee \
-SIXFIGS_VM_ZONE=us-central1-a \
+SIXFIGS_VM_ZONE=us-central1-c \
 SIXFIGS_SERVICE_ACCOUNT=tee-dev-vm@sixfigs.iam.gserviceaccount.com \
   ./scripts/create-vm-dev.sh
 ```
+
+Confidential capacity moves around: a stopped VM can fail to start with
+`ZONE_RESOURCE_POOL_EXHAUSTED`. The workload is stateless, so delete it and
+recreate in another zone (`us-central1-c` worked when `-a` and `-f` were
+stocked out); the external IP may change.
 
 `create-vm-dev.sh` forwards `SIXFIGS_RPC_SOLANA`, optional
 `SIXFIGS_RPC_SEPOLIA`, `SIXFIGS_NULLIFIER_KEY`, `COINGECKO_API_KEY`, and
@@ -123,9 +128,16 @@ SIXFIGS_ALLOWED_NULLIFIER_SCHEMES=keyed-v1
 gcloud compute instances stop sixfigs-enclave-dev --zone us-central1-a
 gcloud compute instances start sixfigs-enclave-dev --zone us-central1-a
 
+# Toggle tier-test balances on an existing VM (stop, add, start).
+gcloud compute instances stop sixfigs-enclave-dev --zone us-central1-c
+gcloud compute instances add-metadata sixfigs-enclave-dev --zone us-central1-c \
+  --metadata=tee-env-SIXFIGS_DEV_INSECURE_BALANCES=1
+gcloud compute instances start sixfigs-enclave-dev --zone us-central1-c
+# Remove the key with `remove-metadata --keys=...` to return to real-chain mode.
+
 # If the workload fails to start, read the launcher serial console.
 gcloud compute instances get-serial-port-output sixfigs-enclave-dev \
-  --zone us-central1-a | tail -50
+  --zone us-central1-c | tail -50
 
 # Rebuild after code changes: push a new digest, recreate the VM (a restart
 # alone keeps the old image).
