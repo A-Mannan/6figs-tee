@@ -91,7 +91,7 @@ portable to production.
 
 ```bash
 IP=$(gcloud compute instances describe sixfigs-enclave-dev \
-  --zone us-central1-a --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+  --zone us-central1-c --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
 curl -s "http://$IP:8080/healthz"
 ```
 
@@ -125,8 +125,8 @@ SIXFIGS_ALLOWED_NULLIFIER_SCHEMES=keyed-v1
 
 ```bash
 # Cost control: stop when not in use; start reruns the workload cleanly.
-gcloud compute instances stop sixfigs-enclave-dev --zone us-central1-a
-gcloud compute instances start sixfigs-enclave-dev --zone us-central1-a
+gcloud compute instances stop sixfigs-enclave-dev --zone us-central1-c
+gcloud compute instances start sixfigs-enclave-dev --zone us-central1-c
 
 # Toggle tier-test balances on an existing VM (stop, add, start).
 gcloud compute instances stop sixfigs-enclave-dev --zone us-central1-c
@@ -141,7 +141,7 @@ gcloud compute instances get-serial-port-output sixfigs-enclave-dev \
 
 # Rebuild after code changes: push a new digest, recreate the VM (a restart
 # alone keeps the old image).
-gcloud compute instances delete sixfigs-enclave-dev --zone us-central1-a
+gcloud compute instances delete sixfigs-enclave-dev --zone us-central1-c
 ```
 
 Roughly $60/month left running; stop/start or delete for day-to-day dev. The
