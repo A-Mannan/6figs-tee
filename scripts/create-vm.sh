@@ -36,6 +36,12 @@ METADATA="^~^tee-image-reference=${IMAGE_REF}"
 # failure is safe. Run at least two such VMs behind a load balancer; no
 # affinity is required.
 METADATA+="~tee-restart-policy=Always"
+# Dev VMs pass tee-env-* entries here; the workload image must allowlist each
+# variable in its tee.launch_policy.allow_env_override label. Production
+# images keep that label empty, so this only takes effect for dev builds.
+if [[ -n "${SIXFIGS_EXTRA_METADATA:-}" ]]; then
+  METADATA+="~${SIXFIGS_EXTRA_METADATA}"
+fi
 
 echo "==> Creating Confidential Space VM ${SIXFIGS_VM_NAME}"
 gcloud compute instances create "${SIXFIGS_VM_NAME}" \

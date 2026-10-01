@@ -1,0 +1,146 @@
+# Dev enclave on Google Cloud
+
+DEV ONLY. This deploys the real Confidential Space attestation path against
+devnet/testnet chains. The image built here relaxes one launch-policy label
+(`allow_env_override`) so configuration can come from VM metadata; production
+images keep it empty. Never pin the dev digest in production policy.
+
+## What you get
+
+- One Confidential Space VM running the production boot image family
+  (`confidential-space`), so verification behaves exactly like production.
+- Solana devnet + Ethereum Sepolia balances priced at mainnet asset prices.
+- Real attestation tokens verified by the client/backend with the dev project
+  and dev image digest pinned.
+
+Devnet balances are tiny, so the flow usually proves tier 0. For tier-boundary
+tests set `SIXFIGS_DEV_INSECURE_BALANCES=1` when creating the VM: the enclave
+then returns deterministic large balances instead of RPC reads.
+
+## One-time GCP setup
+
+```bash
+gcloud billing projects link sixfigs --billing-account=<BILLING_ACCOUNT_ID>
+gcloud services enable compute.googleapis.com artifactregistry.googleapis.com \
+  logging.googleapis.com confidentialcomputing.googleapis.com --project sixfigs
+
+gcloud artifacts repositories create tee --repository-format=docker \
+  --location=us-central1 --project sixfigs
+
+gcloud iam service-accounts create tee-dev-vm \
+  --display-name="6figs tee dev VM" --project sixfigs
+gcloud projects add-iam-policy-binding sixfigs \
+  --member=serviceAccount:tee-dev-vm@sixfigs.iam.gserviceaccount.com \
+  --role=roles/confidentialcomputing.workloadUser
+gcloud artifacts repositories add-iam-policy-binding tee \
+  --location=us-central1 --project sixfigs \
+  --member=serviceAccount:tee-dev-vm@sixfigs.iam.gserviceaccount.com \
+  --role=roles/artifactregistry.reader
+
+gcloud compute firewall-rules create allow-tee-dev-8080 --project sixfigs \
+  --allow=tcp:8080 --source-ranges=<YOUR_PUBLIC_IP>/32
+
+gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+```
+
+## Build and push the dev image
+
+```bash
+SIXFIGS_WORKLOAD_PROJECT=sixfigs SIXFIGS_ARTIFACT_REPOSITORY=tee \
+  ./scripts/build-image-dev.sh
+```
+
+The script prints the digest. Keep it for the client/backend policy.
+
+## Create the VM
+
+Put dev values in `.env.dev` (gitignored) and source it:
+
+```bash
+set -a; source .env.dev; set +a
+SIXFIGS_VM_PROJECT=sixfigs \
+SIXFIGS_WORKLOAD_PROJECT=sixfigs \
+SIXFIGS_ARTIFACT_REPOSITORY=tee \
+SIXFIGS_VM_ZONE=us-central1-a \
+SIXFIGS_SERVICE_ACCOUNT=tee-dev-vm@sixfigs.iam.gserviceaccount.com \
+  ./scripts/create-vm-dev.sh
+```
+
+`create-vm-dev.sh` forwards `SIXFIGS_RPC_SOLANA`, optional
+`SIXFIGS_RPC_SEPOLIA`, `SIXFIGS_NULLIFIER_KEY`, `COINGECKO_API_KEY`, and
+`SIXFIGS_DEV_INSECURE_BALANCES` as `tee-env-*` metadata. Required in
+`.env.dev`:
+
+```
+SIXFIGS_RPC_SOLANA=https://api.devnet.solana.com
+SIXFIGS_RPC_SEPOLIA=https://ethereum-sepolia-rpc.publicnode.com
+SIXFIGS_NULLIFIER_KEY=<openssl rand -hex 32>
+SIXFIGS_ALLOWED_ORIGIN=http://localhost:3000
+```
+
+The nullifier key is a dev key. It is visible in VM metadata to anyone with
+`compute.instances.get`; never reuse it and never treat dev nullifiers as
+portable to production.
+
+## Verify
+
+```bash
+IP=$(gcloud compute instances describe sixfigs-enclave-dev \
+  --zone us-central1-a --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
+curl -s "http://$IP:8080/healthz"
+```
+
+Then verify the real attestation from Node:
+
+```ts
+import { RegistrationClient } from "@sixfigs/tee/client";
+
+const client = new RegistrationClient({
+  enclaveUrl: `http://${IP}:8080`,
+  policy: {
+    allowedImageDigests: ["sha256:<dev digest>"],
+    allowedProjects: ["sixfigs"],
+  },
+});
+console.log(await client.hello());
+```
+
+App dev config to point at the VM:
+
+```
+NEXT_PUBLIC_ENCLAVE_URL=http://<IP>:8080
+NEXT_PUBLIC_IMAGE_DIGEST=sha256:<dev digest>
+NEXT_PUBLIC_GCP_PROJECT=sixfigs
+SIXFIGS_IMAGE_DIGEST=sha256:<dev digest>
+SIXFIGS_GCP_PROJECT=sixfigs
+SIXFIGS_ALLOWED_NULLIFIER_SCHEMES=keyed-v1
+```
+
+## Operations
+
+```bash
+# Cost control: stop when not in use; start reruns the workload cleanly.
+gcloud compute instances stop sixfigs-enclave-dev --zone us-central1-a
+gcloud compute instances start sixfigs-enclave-dev --zone us-central1-a
+
+# If the workload fails to start, read the launcher serial console.
+gcloud compute instances get-serial-port-output sixfigs-enclave-dev \
+  --zone us-central1-a | tail -50
+
+# Rebuild after code changes: push a new digest, recreate the VM (a restart
+# alone keeps the old image).
+gcloud compute instances delete sixfigs-enclave-dev --zone us-central1-a
+```
+
+Roughly $60/month left running; stop/start or delete for day-to-day dev. The
+$300 trial credits expire about 90 days after signup, so don't hoard them.
+
+## Security notes
+
+- Dev image digest belongs only in dev policies; production pins the real
+  release digest.
+- The dev VM runs the production boot family with `dbgstat` disabled, so
+  `allowDebug` stays false and no policy differs except the env allowlist.
+- If you must use the `confidential-space-debug` boot family while bringing
+  the workload up, set `allowDebug: true` in local dev policies only; never
+  pin a debug image in production.

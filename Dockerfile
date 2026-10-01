@@ -21,8 +21,12 @@ COPY src ./src
 
 # Launch policies: the VM operator may not override our command, env, mounts,
 # capabilities, or enable logging that could exfiltrate witness data.
+# TEE_ALLOW_ENV_OVERRIDE exists for dev builds only: it lets a dev VM set the
+# allowlisted variables via tee-env-* metadata. Production builds must leave
+# it empty so no environment variable can be overridden at launch.
+ARG TEE_ALLOW_ENV_OVERRIDE=""
 LABEL "tee.launch_policy.allow_cmd_override"="false"
-LABEL "tee.launch_policy.allow_env_override"=""
+LABEL "tee.launch_policy.allow_env_override"="${TEE_ALLOW_ENV_OVERRIDE}"
 LABEL "tee.launch_policy.allow_capabilities"="false"
 LABEL "tee.launch_policy.allow_cgroups"="false"
 LABEL "tee.launch_policy.log_redirect"="never"

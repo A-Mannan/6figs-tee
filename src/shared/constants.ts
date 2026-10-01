@@ -189,6 +189,28 @@ export const CHAINS: readonly ChainConfig[] = [
 ];
 
 /**
+ * Testnet chains, enabled only when `SIXFIGS_DEV_CHAINS=1`. Devnet assets are
+ * worthless, so these entries must never enter valuation or attestation
+ * policy in production; a reset dev chain can mint arbitrary balances.
+ */
+export const DEV_CHAINS: readonly ChainConfig[] = [
+  {
+    family: "evm",
+    chainId: 11155111,
+    name: "sepolia",
+    nativeSymbol: "ETH",
+    nativePriceId: "ethereum",
+    coingeckoPlatform: "ethereum",
+    nativeDecimals: 18,
+    defaultRpcEnv: "SIXFIGS_RPC_SEPOLIA",
+  },
+];
+
+export function activeChains(devEnabled: boolean): readonly ChainConfig[] {
+  return devEnabled ? [...CHAINS, ...DEV_CHAINS] : CHAINS;
+}
+
+/**
  * There is deliberately no token allowlist. Every token the discovery layer
  * finds is priced; anything the price API cannot quote is skipped rather than
  * valued at a guess. Assets trading within the par band are treated as

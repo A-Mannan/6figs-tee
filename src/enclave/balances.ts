@@ -1,5 +1,5 @@
 import {
-  CHAINS,
+  activeChains,
   MAX_ASSETS_PER_REQUEST,
   type ChainConfig,
 } from "../shared/constants.ts";
@@ -52,7 +52,7 @@ const ERC20_SYMBOL = "0x95d89b41";
 /** Resolve EVM RPC endpoints from the environment, one per chain. */
 export function evmRpcsFromEnv(env: NodeJS.ProcessEnv = process.env): EvmRpcConfig[] {
   const out: EvmRpcConfig[] = [];
-  for (const chain of CHAINS) {
+  for (const chain of activeChains(env.SIXFIGS_DEV_CHAINS === "1")) {
     if (chain.family !== "evm") continue;
     const url = httpsUrl(env[chain.defaultRpcEnv] ?? env[`${chain.defaultRpcEnv}_URL`]);
     if (!url) continue;

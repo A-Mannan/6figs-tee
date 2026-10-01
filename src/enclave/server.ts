@@ -45,6 +45,7 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
     new CoinGeckoPricing({
       ...(env.COINGECKO_API_KEY ? { apiKey: env.COINGECKO_API_KEY } : {}),
       ...(env.SIXFIGS_PRICE_TTL_MS ? { ttlMs: Number(env.SIXFIGS_PRICE_TTL_MS) } : {}),
+      ...(env.SIXFIGS_DEV_CHAINS === "1" ? { devChains: true } : {}),
     });
 
   const nullifier = selectNullifierScheme(env);

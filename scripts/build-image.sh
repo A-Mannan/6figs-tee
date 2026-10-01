@@ -14,8 +14,13 @@ set -euo pipefail
 REGION="${SIXFIGS_ARTIFACT_REGION:-us-central1}"
 IMAGE="${REGION}-docker.pkg.dev/${SIXFIGS_WORKLOAD_PROJECT}/${SIXFIGS_ARTIFACT_REPOSITORY}/${SIXFIGS_IMAGE_NAME}:${SIXFIGS_IMAGE_TAG}"
 
+BUILD_ARGS=()
+if [[ -n "${SIXFIGS_ALLOW_ENV_OVERRIDE:-}" ]]; then
+  BUILD_ARGS+=(--build-arg "TEE_ALLOW_ENV_OVERRIDE=${SIXFIGS_ALLOW_ENV_OVERRIDE}")
+fi
+
 echo "==> Building ${IMAGE}"
-docker build --platform=linux/amd64 -t "${IMAGE}" .
+docker build --platform=linux/amd64 ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"} -t "${IMAGE}" .
 
 echo "==> Pushing ${IMAGE}"
 docker push "${IMAGE}"

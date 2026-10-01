@@ -46,6 +46,24 @@ test("non-https RPC endpoints are ignored", () => {
   );
 });
 
+test("devnet chains are opt-in", () => {
+  const prod = evmRpcsFromEnv({
+    SIXFIGS_RPC_SEPOLIA: "https://sepolia.example",
+  } as NodeJS.ProcessEnv);
+  assert.equal(
+    prod.some((entry) => entry.chain.chainId === 11155111),
+    false,
+  );
+
+  const dev = evmRpcsFromEnv({
+    SIXFIGS_RPC_SEPOLIA: "https://sepolia.example",
+    SIXFIGS_DEV_CHAINS: "1",
+  } as NodeJS.ProcessEnv);
+  const sepolia = dev.find((entry) => entry.chain.chainId === 11155111);
+  assert.equal(sepolia?.chain.name, "sepolia");
+  assert.equal(sepolia?.rpcUrl, "https://sepolia.example");
+});
+
 test("agreement accepts matching providers and rejects drift", () => {
   assert.equal(requireAgreement(100n, 100n), 100n);
   assert.equal(requireAgreement(100n, null), 100n);

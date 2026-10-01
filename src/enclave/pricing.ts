@@ -1,8 +1,9 @@
 import {
-  CHAINS,
+  activeChains,
   MAJORS_PRICE_FLOOR_MICRO,
   PAR_STABLE_BAND_MICRO,
   VALUE_SCALE,
+  type ChainConfig,
 } from "../shared/constants.ts";
 import { getJson } from "./rpc.ts";
 import type { RawBalance } from "./balances.ts";
@@ -58,17 +59,21 @@ export class CoinGeckoPricing implements PricingProvider {
   private readonly ttlMs: number;
   private readonly headers: Record<string, string>;
   private readonly fallback: PricingProvider | null;
+  private readonly chains: readonly ChainConfig[];
 
   constructor(options: {
     apiKey?: string;
     ttlMs?: number;
     fallback?: PricingProvider;
+    /** Include devnet chains; never enable where testnet value matters. */
+    devChains?: boolean;
   } = {}) {
     this.ttlMs = options.ttlMs ?? 120_000;
     this.headers = options.apiKey
       ? { "x-cg-demo-api-key": options.apiKey }
       : {};
     this.fallback = options.fallback ?? null;
+    this.chains = activeChains(options.devChains ?? false);
   }
 
   async quote(balance: RawBalance): Promise<PriceQuote | null> {
@@ -90,7 +95,9 @@ export class CoinGeckoPricing implements PricingProvider {
   }
 
   private async nativeQuote(balance: RawBalance): Promise<PriceQuote | null> {
-    const chain = CHAINS.find((c) => c.chainId === balance.chainId && c.family === balance.family);
+    const chain = this.chains.find(
+      (c) => c.chainId === balance.chainId && c.family === balance.family,
+    );
     const id = chain?.nativePriceId;
     if (!id) return null;
     const data = await getJson<SimplePriceResponse>(
@@ -118,7 +125,7 @@ export class CoinGeckoPricing implements PricingProvider {
       return priceMicroUsd > 0n ? { priceMicroUsd, derived: false } : null;
     }
 
-    const chain = CHAINS.find((c) => c.chainId === balance.chainId && c.family === "evm");
+    const chain = this.chains.find((c) => c.chainId === balance.chainId && c.family === "evm");
     const platform = chain?.coingeckoPlatform;
     if (!platform) return null;
     const address = balance.asset.toLowerCase();
