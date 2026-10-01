@@ -1,5 +1,33 @@
 # Integrating with the Next.js frontend and NestJS backend
 
+## Dependency
+
+Both apps consume this repo as a versioned git dependency — never a relative
+path, so both sides always build against the same reviewed code:
+
+```json
+{ "dependencies": { "@sixfigs/tee": "github:A-Mannan/6figs-tee#<tag-sha>" } }
+```
+
+```ts
+import { RegistrationClient } from "@sixfigs/tee/client";
+import { SixFigsVerification } from "@sixfigs/tee/verifier";
+import { productTierLabel } from "@sixfigs/tee/shared";
+```
+
+Only these three subpaths are public; deep imports are blocked by the
+`exports` map. Releasing a consumable tag from this repo:
+
+```bash
+npm run build   # emits dist/ (client, verifier, shared + .d.ts)
+npm test        # must be green before tagging
+git add -f dist # dist/ is gitignored; force-add it deliberately at release
+git tag <tag> && git push origin <tag>
+```
+
+Consumers then pin `"github:A-Mannan/6figs-tee#<tag-sha>"` and run a fresh
+`npm install` to confirm it resolves byte-identical code.
+
 ## Frontend (Next.js)
 
 Three steps: connect wallets, sign the ownership message, submit.
@@ -8,7 +36,7 @@ Three steps: connect wallets, sign the ownership message, submit.
 import {
   RegistrationClient,
   type WalletDescriptor,
-} from "@sixfigs/tee/client/register";
+} from "@sixfigs/tee/client";
 
 const client = new RegistrationClient({
   enclaveUrl: process.env.NEXT_PUBLIC_ENCLAVE_URL!,
@@ -86,8 +114,8 @@ import { Module, Injectable, Controller, Post, Body } from "@nestjs/common";
 import {
   SixFigsVerification,
   RegistrationConflict,
-} from "@sixfigs/tee/verifier/service";
-import { VerificationError } from "@sixfigs/tee/verifier/index";
+  VerificationError,
+} from "@sixfigs/tee/verifier";
 
 @Injectable()
 class VerificationConfig {

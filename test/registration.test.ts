@@ -19,6 +19,7 @@ import {
 } from "../src/shared/nullifiers.ts";
 import { randomBytes } from "../src/shared/crypto.ts";
 import { base58Encode } from "../src/shared/base58.ts";
+import { RegistrationClient } from "../src/client/register.ts";
 import { MockAttestationProvider } from "../src/enclave/attestation-provider.ts";
 import { EnclaveKeyManager } from "../src/enclave/keys.ts";
 import { StaticPricing } from "../src/enclave/pricing.ts";
@@ -382,3 +383,22 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   out.set(b, a.length);
   return out;
 }
+
+test("prepare() adopts a caller nonce and it round-trips into body.nonce", async () => {
+  const { wallet, privateKey } = evmWallet();
+  const client = new RegistrationClient({ enclaveUrl: "http://127.0.0.1:1" });
+  const callerNonce = "backend-session-9f2c41aa77";
+  const prepared = client.prepare({
+    wallets: [{ family: "evm", chainId: 1, address: wallet.address }],
+    nonce: callerNonce,
+  });
+  assert.equal(prepared.nonce, callerNonce);
+
+  wallet.signature = signEvm(privateKey, prepared.message);
+  const request = buildRequest([wallet], {
+    nonce: prepared.nonce,
+    timestamp: prepared.timestamp,
+  });
+  const signed = await registerPortfolio(request, deps());
+  assert.equal(signed.body.nonce, callerNonce);
+});

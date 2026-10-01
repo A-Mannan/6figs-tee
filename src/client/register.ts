@@ -49,8 +49,9 @@ export interface RegistrationClientOptions {
 /**
  * Two-phase registration client:
  *
- *   1. prepare()  — fetches + verifies the enclave attestation, generates the
- *                   identity secret and nonce, and returns the message to sign.
+ *   1. prepare()  — verifies the enclave attestation, generates the request
+ *                   nonce (or adopts a caller-supplied session nonce), and
+ *                   returns the message to sign.
  *   2. submit()   — takes the wallet signatures over that message, encrypts
  *                   everything to the enclave, and returns the verified result.
  *
@@ -90,8 +91,12 @@ export class RegistrationClient {
     remove?: WalletDescriptor[];
     disclosure?: Disclosure;
     timestamp?: number;
+    /** Caller session nonce, echoed into the request so the backend can bind
+     * the result to its session. Must be at least 8 characters; the enclave
+     * enforces the minimum. Generated randomly when omitted. */
+    nonce?: string;
   }): PreparedRegistration {
-    const nonce = bytesToBase64url(randomBytes(24));
+    const nonce = input.nonce ?? bytesToBase64url(randomBytes(24));
     const timestamp = input.timestamp ?? Date.now();
     const removals = input.remove ?? [];
     if (removals.length > 0 && input.wallets.length === 0) {

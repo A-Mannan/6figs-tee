@@ -13,6 +13,19 @@ import type {
 } from "../shared/types.ts";
 import { parseJwt, verifyPkiToken, verifyRs256WithJwks, type Jwk } from "./jwt.ts";
 
+export {
+  RegistrationService,
+  RegistrationConflict,
+  type RegistrationServiceOptions,
+} from "./service.ts";
+export {
+  InMemoryNullifierStore,
+  recordFromBody,
+  type NullifierStore,
+  type StoredRegistration,
+} from "./store.ts";
+export { SixFigsVerification, type SixFigsVerificationOptions } from "./nestjs.ts";
+
 export interface EnclavePolicy {
   /** Container image digests the backend will accept. Must not be empty. */
   allowedImageDigests: string[];

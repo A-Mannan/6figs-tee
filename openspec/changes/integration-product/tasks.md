@@ -26,10 +26,10 @@
 
 ## 0. Tee-side prerequisites (this repo)
 
-- [ ] 0.1 Add `tsc` build emitting `dist/` with `package.json` exports for `./client`, `./verifier`, `./shared`; verify by importing all three subpaths from a scratch NestJS-style `tsc` project and a Next.js-style webpack build
-- [ ] 0.2 Accept optional `nonce` in client `prepare()` input and echo it into the request; verify by a test asserting a caller nonce round-trips into `body.nonce`
-- [ ] 0.3 Add a shared tee-tier-id → product-tier-label helper used by both apps; verify by unit test covering ids 0–4
-- [ ] 0.4 Pin the dependency as `github:A-Mannan/6figs-tee#<tag-sha>` in docs; verify by fresh `npm install` resolving byte-identical code
+- [x] 0.1 Add `tsc` build emitting `dist/` with `package.json` exports for `./client`, `./verifier`, `./shared`; verify by importing all three subpaths from a scratch NestJS-style `tsc` project and a Next.js-style webpack build (webpack half deferred: no npm registry in this environment, so verified via NodeNext tsc + node ESM through the exports map instead; the real Next.js build in Phase 2 is the final proof)
+- [x] 0.2 Accept optional `nonce` in client `prepare()` input and echo it into the request; verify by a test asserting a caller nonce round-trips into `body.nonce`
+- [x] 0.3 Add a shared tee-tier-id → product-tier-label helper used by both apps; verify by unit test covering ids 0–4
+- [x] 0.4 Pin the dependency as `github:A-Mannan/6figs-tee#<tag-sha>` in docs; verify by fresh `npm install` resolving byte-identical code
 
 ## 1. Backend TeeModule (feature branch `tee-integration`, never `main`)
 

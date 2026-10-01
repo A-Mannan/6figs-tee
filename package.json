@@ -8,8 +8,23 @@
   "engines": {
     "node": ">=22.6"
   },
+  "files": ["dist"],
+  "exports": {
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "default": "./dist/client/index.js"
+    },
+    "./verifier": {
+      "types": "./dist/verifier/index.d.ts",
+      "default": "./dist/verifier/index.js"
+    },
+    "./shared": {
+      "types": "./dist/shared/index.d.ts",
+      "default": "./dist/shared/index.js"
+    }
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --experimental-strip-types \"test/**/*.test.ts\"",
     "test:watch": "node --test --watch --experimental-strip-types \"test/**/*.test.ts\"",
