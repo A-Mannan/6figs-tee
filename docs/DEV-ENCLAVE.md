@@ -38,7 +38,11 @@ gcloud artifacts repositories add-iam-policy-binding tee \
   --role=roles/artifactregistry.reader
 
 gcloud compute firewall-rules create allow-tee-dev-8080 --project sixfigs \
-  --allow=tcp:8080 --source-ranges=<YOUR_PUBLIC_IP>/32
+  --allow=tcp:8080 --source-ranges=0.0.0.0/0
+
+The rule is deliberately open: the dev ISP rotates the client IPv4, and the
+enclave is a public registration endpoint anyway (attestation pins the image,
+every request and result is encrypted/signed, and the server rate-limits).
 
 gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
 ```
@@ -109,6 +113,20 @@ const client = new RegistrationClient({
 });
 console.log(await client.hello());
 ```
+
+Smoke the full path (registration + escrow + recheck, no signatures beyond the
+fresh wallet):
+
+```bash
+node --experimental-strip-types scripts/smoke-enclave.ts \
+  http://<IP>:8080 sha256:<digest> sixfigs solana
+```
+
+Live instance (2026-10-01): `sixfigs-enclave-dev` in `us-east1-b`,
+`http://34.73.89.203:8080`, digest
+`sha256:2b5f840b2a009940f8a2ba7fdc0654dc8f2620a2542b851bec74cec5073fe232`.
+Rebuilding the image changes the digest; recreating the VM may change the IP —
+re-pin both in app configs afterwards.
 
 App dev config to point at the VM:
 
