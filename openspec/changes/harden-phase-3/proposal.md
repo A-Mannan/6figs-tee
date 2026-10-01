@@ -20,7 +20,7 @@ Two hardening passes closed the fail-open paths, keyed the nullifiers, and bound
 - `ha-runbook`: multi-instance deployment and incident procedures.
 
 ### Modified Capabilities
-- None. No baseline specs exist yet, so all behavior is captured as new requirements in the change deltas.
+- None. All touched capabilities are new; the baseline specs in `openspec/specs/` are unaffected.
 
 ## Impact
 

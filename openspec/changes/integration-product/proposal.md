@@ -21,7 +21,7 @@ The TEE verification core is complete, tested, and pushed, but no product code c
 - `frontend-tee-flow`: browser prove/re-prove flow against the enclave and backend in the Next.js frontend.
 
 ### Modified Capabilities
-- None. No baseline specs exist yet, so all behavior is captured as new requirements in the change deltas.
+- None. All touched capabilities are new; the baseline specs in `openspec/specs/` are unaffected.
 
 ## Impact
 

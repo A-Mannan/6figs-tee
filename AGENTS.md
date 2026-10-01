@@ -194,6 +194,7 @@ This repo uses OpenSpec (skills in `.agents/skills/openspec-*`, root at
   signed price feed, threshold transitions, HA runbook). All tasks pending;
   do not start until integration Phase 0 ships. Its `## Blockers` lists the
   KMS, feed-vendor, review, and infra dependencies.
-- `openspec/changes/harden-phase-2/` — fully implemented (19/19 tasks,
-  82/82 tests) and awaiting archive. `harden-verification-and-limits/`
-  likewise complete (19/19) and awaiting archive.
+- Archived: `harden-verification-and-limits` and `harden-phase-2` (both 19/19,
+  82/82 tests) moved to `openspec/changes/archive/` on 2026-10-01; their
+  deltas are now the baseline in `openspec/specs/`. Changes whose deltas say
+  ADDED against these capabilities must use MODIFIED/ADDED against the specs.
