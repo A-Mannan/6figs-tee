@@ -22,9 +22,13 @@ what would have to change to strengthen it further.
 
 Per user: a random-looking **identity nullifier**, a **tier**, a coarse
 **portfolio band** (`<100k`, `100k-300k`, `300k-500k`, `500k-1m`, `1m+`), a
-**stablecoin share** in basis points, and one **wallet nullifier** per enrolled
-wallet. Users who choose `hidden` disclosure send no allocation at all, only the
-tier.
+**stablecoin share** in basis points, up to three **disclosed asset symbols**
+(`topAssets`, never amounts), and one **wallet nullifier** per enrolled
+wallet. Users who choose `hidden` disclosure send no allocation at all, only
+tier and symbols. The backend additionally holds an **escrow blob**: the
+wallet set encrypted to the enclave escrow key. It is ciphertext to everyone
+but the enclave, which alone decrypts it inside a recheck to refresh the tier
+without new signatures.
 
 The identity nullifier is not a credential and not a secret: it is the
 commitment of the wallet set —
@@ -186,6 +190,10 @@ The curated `TOKEN_SEEDS` list was deleted. Consequences and replacement rules:
 ## Improvements planned
 
 - KMS-backed OPRF nullifiers, closing the dictionary-attack gap.
+- KMS-bound escrow key: the production escrow key must be released only to
+  the attested image, so the "only the enclave can decrypt" claim holds
+  against the operator as well. The dev path (`SIXFIGS_ESCROW_KEY` via tee-env)
+  is explicitly dev-only.
 - Signed price feed and dual-provider balance reads (or storage proofs).
 - Threshold transition policy so a user who loses one of N wallets can recover
   with N−1 signatures, with a proportional takeover-risk model.

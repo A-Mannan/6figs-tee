@@ -23,6 +23,7 @@ export interface AttestationProvider {
   buildKeyAttestation(params: {
     signingPublicKey: Uint8Array;
     encryptionPublicKey: Uint8Array;
+    escrowPublicKey: Uint8Array;
   }): Promise<EnclaveKeyAttestation>;
 }
 
@@ -88,8 +89,13 @@ export class ConfidentialSpaceAttestationProvider implements AttestationProvider
   async buildKeyAttestation(params: {
     signingPublicKey: Uint8Array;
     encryptionPublicKey: Uint8Array;
+    escrowPublicKey: Uint8Array;
   }): Promise<EnclaveKeyAttestation> {
-    const nonce = keyAttestationNonce(params.signingPublicKey, params.encryptionPublicKey);
+    const nonce = keyAttestationNonce(
+      params.signingPublicKey,
+      params.encryptionPublicKey,
+      params.escrowPublicKey,
+    );
     const token = await this.getToken({
       audience: "6figs-enclave-key",
       nonces: [nonce],
@@ -167,8 +173,13 @@ export class MockAttestationProvider implements AttestationProvider {
   async buildKeyAttestation(params: {
     signingPublicKey: Uint8Array;
     encryptionPublicKey: Uint8Array;
+    escrowPublicKey: Uint8Array;
   }): Promise<EnclaveKeyAttestation> {
-    const nonce = keyAttestationNonce(params.signingPublicKey, params.encryptionPublicKey);
+    const nonce = keyAttestationNonce(
+      params.signingPublicKey,
+      params.encryptionPublicKey,
+      params.escrowPublicKey,
+    );
     const token = await this.getToken({
       audience: "6figs-enclave-key",
       nonces: [nonce],

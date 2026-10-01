@@ -34,6 +34,7 @@ Three steps: connect wallets, sign the ownership message, submit.
 
 ```ts
 import {
+  encryptEscrowBlob,
   RegistrationClient,
   type WalletDescriptor,
 } from "@sixfigs/tee/client";
@@ -49,8 +50,11 @@ const client = new RegistrationClient({
 
 // 1. Enclave is verified, message to sign is produced.
 const prepared = client.prepare({
-  wallets: [{ family: "evm", chainId: 1, address } satisfies WalletDescriptor],
+  wallets: [
+    { family: "evm", chainId: 1, address, label: "MetaMask" } satisfies WalletDescriptor,
+  ],
   disclosure: "category",
+  nonce: backendSessionNonce, // single-use, issued by your backend
 });
 
 // 2. Each wallet signs prepared.message with personal_sign (EVM) or
@@ -66,13 +70,26 @@ const signed = await client.submit({
   signatures: { [`evm:${address.toLowerCase()}`]: signature },
 });
 
-// 4. Hand the signed result to your backend.
+// 4. Escrow the wallet set to the enclave so the backend can re-verify later
+//    without ever holding an address.
+const hello = await client.hello();
+const escrowBlob = await encryptEscrowBlob(hello.escrowPublicKey, [
+  { family: "evm", chainId: 1, address, label: "MetaMask" },
+]);
+
+// 5. Hand the signed result and the escrow blob to your backend.
 await fetch("/api/verify", {
   method: "POST",
   headers: { "content-type": "application/json" },
-  body: JSON.stringify(signed),
+  body: JSON.stringify({ signed, escrowBlob }),
 });
 ```
+
+`signed.body` carries `tier`, `portfolioBand`, and `topAssets` (up to three
+symbols, never amounts) — that is everything the profile may show. Rechecks
+need no signatures: the backend replays the stored `escrowBlob` to the enclave,
+which decrypts it inside, re-fetches balances, and returns a fresh attested
+result.
 
 There is no identity secret to persist. The account is the wallet set:
 `prepare()` derives the identity from the wallet addresses, and `submit()`
@@ -223,6 +240,7 @@ schema:
 | `SIXFIGS_RPC_*_SECONDARY` | enclave | optional redundant RPC per chain; value reads must agree within 0.1% |
 | `SIXFIGS_RPC_SOLANA_SECONDARY` | enclave | redundant Solana RPC, same agreement rule |
 | `SIXFIGS_NULLIFIER_KEY` | enclave | 64-hex secret for keyed nullifiers; required in production |
+| `SIXFIGS_ESCROW_KEY` | enclave | 64-hex persistent escrow key for `/recheck`; required wherever rechecks run (dev: via tee-env allowlist) |
 | `COINGECKO_API_KEY` | enclave | raises pricing rate limits |
 | `SIXFIGS_ALLOWED_ORIGIN` | enclave | CORS origin; when unset no cross-origin headers are emitted |
 | `SIXFIGS_REGISTRATION_BUDGET_MS` | enclave | dev/test override for the 30 s registration budget (fails closed) |

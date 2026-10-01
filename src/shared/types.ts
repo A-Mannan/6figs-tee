@@ -13,6 +13,9 @@ export interface WalletInput {
   /** For EVM wallets the hex ECDSA signature over the ownership challenge.
    *  For Solana the base58 ed25519 signature over the same challenge bytes. */
   signature: string;
+  /** Optional wallet app label (e.g. "Phantom") echoed into the result
+   *  bindings so the profile can name wallets without an address. */
+  label?: string;
 }
 
 export interface RegistrationRequest {
@@ -54,6 +57,31 @@ export interface WalletNullifierEntry {
   walletNullifier: string;
   family: "evm" | "solana";
   chainId: number;
+  /** Optional wallet app label, sanitized. Never an address. */
+  label?: string;
+}
+
+/** Wallet set escrowed by the browser to the enclave escrow key. */
+export interface EscrowWallet {
+  family: "evm" | "solana";
+  chainId: number;
+  address: string;
+  label?: string;
+}
+
+export interface EscrowPayload {
+  v: 1;
+  wallets: EscrowWallet[];
+}
+
+/** Backend -> enclave recheck request, encrypted to the session key. */
+export interface RecheckPayload {
+  /** Addresses encrypted to the escrow key; the backend cannot read them. */
+  escrowBlob: SignedEnvelope;
+  /** Identity the backend believes this blob belongs to; the enclave refuses mismatches. */
+  identityNullifier: string;
+  nonce: string;
+  timestamp: number;
 }
 
 /**
@@ -73,6 +101,8 @@ export interface RegistrationResultBody {
   portfolioBand: string;
   /** Basis points of portfolio in stablecoins, always disclosed (safe). */
   stableBps: number;
+  /** Up to three disclosed asset symbols ordered by value. Never amounts. */
+  topAssets: string[];
   disclosure: Disclosure;
   allocation: AllocationEntry[];
   /** The enrolled wallet set after this transition. */
@@ -123,6 +153,8 @@ export interface EnclaveHello {
   policyVersion: string;
   provider: "confidential-space" | "mock";
   encryptionPublicKey: string;
+  /** X25519 escrow key that recheck blobs are encrypted to. */
+  escrowPublicKey: string;
   /** Nullifier scheme the enclave derives wallet nullifiers under. */
   nullifierScheme: NullifierSchemeName;
   keyId: string;

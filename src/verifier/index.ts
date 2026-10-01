@@ -150,6 +150,7 @@ export class AttestationVerifier {
     }
     this.checkExpiry(body);
     this.checkTier(body);
+    this.checkDisclosures(body);
 
     return body;
   }
@@ -161,12 +162,17 @@ export class AttestationVerifier {
     if (sha256Hex(signingKey) !== hello.keyId) {
       throw new VerificationError("bad_keyid", "hello key id does not match the signing key");
     }
+    const escrowKey = base64urlToBytes(hello.escrowPublicKey);
+    if (escrowKey.length !== 32) {
+      throw new VerificationError("bad_keyid", "hello escrow key is malformed");
+    }
     const expectedNonce = keyAttestationNonce(
       signingKey,
       base64urlToBytes(hello.encryptionPublicKey),
+      escrowKey,
     );
     if (expectedNonce !== hello.attestation.keyNonce) {
-      throw new VerificationError("bad_keyid", "hello encryption key is not attested");
+      throw new VerificationError("bad_keyid", "hello keys are not attested");
     }
     this.requireNonce(payload, expectedNonce);
   }
@@ -242,6 +248,30 @@ export class AttestationVerifier {
     }
     if (body.tierFloorMicroUsd && !/^\d+$/.test(body.tierFloorMicroUsd)) {
       throw new VerificationError("bad_tier", "tier floor is not an integer string");
+    }
+  }
+
+  /**
+   * Disclosed fields are product-visible, so they are shape-checked strictly:
+   * symbols are short uppercase alphanumerics ([A-Z0-9], 1–10) and wallet
+   * labels are printable ASCII capped at 32. An address can never pass for a
+   * label because ':'/'x' … base58/hex strings exceed 32 chars or contain
+   * characters outside the set.
+   */
+  private checkDisclosures(body: RegistrationResultBody): void {
+    if (!Array.isArray(body.topAssets) || body.topAssets.length > 3) {
+      throw new VerificationError("bad_assets", "topAssets must be an array of at most 3");
+    }
+    for (const symbol of body.topAssets) {
+      if (typeof symbol !== "string" || !/^[A-Z0-9]{1,10}$/.test(symbol)) {
+        throw new VerificationError("bad_assets", "topAssets contains a malformed symbol");
+      }
+    }
+    const entries = [...body.walletNullifiers, ...(body.removedWalletNullifiers ?? [])];
+    for (const entry of entries) {
+      if (entry.label !== undefined && !/^[\x20-\x7E]{1,32}$/.test(String(entry.label))) {
+        throw new VerificationError("bad_label", "wallet label is malformed");
+      }
     }
   }
 

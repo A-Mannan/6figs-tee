@@ -361,7 +361,7 @@ test("wallet and identity nullifiers are deterministic and set-scoped", () => {
   assert.notEqual(identityFor([{ family: "evm", chainId: 1, address: a.address, signature: "" }]), ab);
 });
 
-test("enclave hello exposes a verifiable key attestation bound to both keys", async () => {
+test("enclave hello exposes a verifiable key attestation bound to all keys", async () => {
   const attestation = new MockAttestationProvider({});
   const keys = new EnclaveKeyManager(attestation, "legacy-v1");
   const hello = await keys.hello("test-policy");
@@ -373,6 +373,7 @@ test("enclave hello exposes a verifiable key attestation bound to both keys", as
     keyAttestationNonce(
       base64urlToBytes(hello.attestation.publicKey),
       base64urlToBytes(hello.encryptionPublicKey),
+      base64urlToBytes(hello.escrowPublicKey),
     ),
   );
 });

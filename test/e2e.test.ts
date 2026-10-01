@@ -11,6 +11,8 @@ import { createEnclaveServer } from "../src/enclave/server.ts";
 import { MockAttestationProvider } from "../src/enclave/attestation-provider.ts";
 import { StaticPricing } from "../src/enclave/pricing.ts";
 import { RegistrationClient, type PreparedRegistration } from "../src/client/register.ts";
+import { encryptEscrowBlob } from "../src/client/escrow.ts";
+import { RecheckClient } from "../src/client/recheck.ts";
 import { AttestationVerifier } from "../src/verifier/index.ts";
 import { RegistrationService } from "../src/verifier/service.ts";
 import { InMemoryNullifierStore } from "../src/verifier/store.ts";
@@ -374,4 +376,125 @@ test("production boot fails closed without a nullifier key", () => {
     () => createEnclaveServer({ env: { NODE_ENV: "production" } as NodeJS.ProcessEnv }),
     /SIXFIGS_NULLIFIER_KEY/,
   );
+});
+
+test("escrow recheck round trip through HTTP", async () => {
+  const app = createEnclaveServer({
+    env: {
+      SIXFIGS_MOCK_ATTESTATION: "1",
+      SIXFIGS_DEV_INSECURE_BALANCES: "1",
+      SIXFIGS_ESCROW_KEY: "11".repeat(32),
+      NODE_ENV: "test",
+    } as NodeJS.ProcessEnv,
+    attestation: new MockAttestationProvider({}),
+    pricing: new StaticPricing({}, 3000),
+    // Ephemeral port: avoid stale keep-alive connections from prior tests.
+    port: 0,
+  });
+  const { port } = await app.listen();
+  after(() => app.server.close());
+  const enclaveUrl = `http://127.0.0.1:${port}`;
+
+  const client = new RegistrationClient({
+    enclaveUrl,
+    policy: { allowMock: true },
+    fetchImpl: fetch,
+  });
+  const alice = evmAccount();
+  const keys = new Map([[alice.address.toLowerCase(), alice.privateKey]]);
+  const prepared = client.prepare({
+    wallets: [{ family: "evm", chainId: 1, address: alice.address }],
+  });
+  const signed = await client.submit({ prepared, signatures: signAll(prepared, keys) });
+  assert.ok(signed.body.topAssets.length >= 1);
+  assert.ok(signed.body.walletNullifiers[0]!.label === undefined);
+
+  const label = "MetaMask";
+  const labeled = client.prepare({
+    wallets: [{ family: "evm", chainId: 1, address: alice.address, label }],
+  });
+  const signedLabeled = await client.submit({
+    prepared: labeled,
+    signatures: signAll(labeled, keys),
+  });
+  assert.equal(signedLabeled.body.walletNullifiers[0]!.label, label);
+
+  const hello = await client.hello();
+  const escrowBlob = await encryptEscrowBlob(hello.escrowPublicKey, [
+    { family: "evm", chainId: 1, address: alice.address, label },
+  ]);
+
+  const recheck = new RecheckClient({
+    enclaveUrl,
+    policy: { allowMock: true },
+    fetchImpl: fetch,
+  });
+  const nonce = "backend-recheck-1234";
+  const rechecked = await recheck.recheck({
+    escrowBlob,
+    identityNullifier: signed.body.identityNullifier,
+    nonce,
+  });
+  assert.equal(rechecked.body.identityNullifier, signed.body.identityNullifier);
+  assert.equal(rechecked.body.nonce, nonce);
+  assert.deepEqual(rechecked.body.walletNullifiers, signedLabeled.body.walletNullifiers);
+  assert.deepEqual(rechecked.body.topAssets, signed.body.topAssets);
+
+  const verifier = new AttestationVerifier({
+    audience: "6figs-registration",
+    allowMock: true,
+    policy: {
+      allowedImageDigests: [],
+      allowedProjects: [],
+      allowedNullifierSchemes: ["legacy-v1"],
+    },
+  });
+  const body = await verifier.verifyRegistration(rechecked, { expectedNonce: nonce });
+  assert.equal(body.tier, signed.body.tier);
+
+  const mismatch = await recheck
+    .recheck({
+      escrowBlob,
+      identityNullifier: "0".repeat(64),
+      nonce: "backend-recheck-5678",
+    })
+    .then(
+      () => null,
+      (error: unknown) => error as { code?: string },
+    );
+  assert.equal(mismatch?.code, "identity_mismatch");
+});
+
+test("recheck is refused without persistent escrow material", async () => {
+  const app = createEnclaveServer({
+    env: {
+      SIXFIGS_MOCK_ATTESTATION: "1",
+      SIXFIGS_DEV_INSECURE_BALANCES: "1",
+      NODE_ENV: "test",
+    } as NodeJS.ProcessEnv,
+    attestation: new MockAttestationProvider({}),
+    pricing: new StaticPricing({}, 3000),
+    port: 0,
+  });
+  const { port } = await app.listen();
+  after(() => app.server.close());
+  const enclaveUrl = `http://127.0.0.1:${port}`;
+
+  const client = new RegistrationClient({
+    enclaveUrl,
+    policy: { allowMock: true },
+    fetchImpl: fetch,
+  });
+  const hello = await client.hello();
+  const escrowBlob = await encryptEscrowBlob(hello.escrowPublicKey, [
+    { family: "evm", chainId: 1, address: evmAccount().address },
+  ]);
+  const recheck = new RecheckClient({ enclaveUrl, policy: { allowMock: true }, fetchImpl: fetch });
+  const failure = await recheck
+    .recheck({ escrowBlob, identityNullifier: "0".repeat(64), nonce: "backend-recheck-9999" })
+    .then(
+      () => null,
+      (error: unknown) => error as { code?: string },
+    );
+  assert.equal(failure?.code, "escrow_unavailable");
 });

@@ -3,37 +3,50 @@ import { DOMAIN } from "./constants.ts";
 import { base64urlToBytes, bytesToBase64url, sha256Hex, utf8 } from "./crypto.ts";
 
 /**
- * The enclave owns two independent keys:
- *  - an Ed25519 key that signs registration results (long-lived for the VM run)
- *  - an X25519 key that decrypts client request envelopes
- * Both are ephemeral to the enclave boot; a key is proven to live inside a
- * genuine enclave by the Confidential Space attestation token binding
- * sha256(signingPubkey || encryptionPubkey).
+ * The enclave owns three keys:
+ *  - an Ed25519 key that signs registration results (ephemeral to the VM run)
+ *  - an X25519 key that decrypts client request envelopes (ephemeral)
+ *  - an X25519 escrow key that decrypts stored address blobs for rechecks
+ *    (persistent material provisioned to the enclave; never leaves it)
+ * A key is proven to live inside a genuine enclave by the Confidential Space
+ * attestation token binding sha256(signingPubkey || encryptionPubkey || escrowPubkey).
  */
 export interface EnclaveKeys {
   signingPrivate: Uint8Array;
   signingPublic: Uint8Array;
   encryptionPrivate: Uint8Array;
   encryptionPublic: Uint8Array;
+  escrowPrivate: Uint8Array;
+  escrowPublic: Uint8Array;
 }
 
-export function generateEnclaveKeys(): EnclaveKeys {
+export function generateEnclaveKeys(escrowPrivate?: Uint8Array): EnclaveKeys {
   const signingPrivate = ed25519.utils.randomPrivateKey();
   const signingPublic = ed25519.getPublicKey(signingPrivate);
   const encryptionPrivate = x25519.utils.randomPrivateKey();
   const encryptionPublic = x25519.getPublicKey(encryptionPrivate);
-  return { signingPrivate, signingPublic, encryptionPrivate, encryptionPublic };
+  const escrow = escrowPrivate ?? x25519.utils.randomPrivateKey();
+  return {
+    signingPrivate,
+    signingPublic,
+    encryptionPrivate,
+    encryptionPublic,
+    escrowPrivate: escrow,
+    escrowPublic: x25519.getPublicKey(escrow),
+  };
 }
 
 export function exportPublicKeys(keys: EnclaveKeys): {
   signingPublicKey: string;
   encryptionPublicKey: string;
+  escrowPublicKey: string;
   keyId: string;
 } {
   const signingPublicKey = bytesToBase64url(keys.signingPublic);
   return {
     signingPublicKey,
     encryptionPublicKey: bytesToBase64url(keys.encryptionPublic),
+    escrowPublicKey: bytesToBase64url(keys.escrowPublic),
     keyId: sha256Hex(keys.signingPublic),
   };
 }
@@ -79,13 +92,14 @@ export function keyId(publicKey: Uint8Array): string {
 }
 
 /**
- * Nonce for the /hello key attestation. Covers both public keys so a token
- * cannot be relayed with a substituted encryption key.
+ * Nonce for the /hello key attestation. Covers all three public keys so a
+ * token cannot be relayed with a substituted encryption or escrow key.
  */
 export function keyAttestationNonce(
   signingPublicKey: Uint8Array,
   encryptionPublicKey: Uint8Array,
+  escrowPublicKey: Uint8Array,
 ): string {
-  return sha256Hex(concat(signingPublicKey, encryptionPublicKey));
+  return sha256Hex(concat(concat(signingPublicKey, encryptionPublicKey), escrowPublicKey));
 }
 

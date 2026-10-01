@@ -28,11 +28,34 @@ export const TIERS: readonly TierDefinition[] = [
   { id: 4, label: "$1M+", minMicroUsd: 1_000_000n * VALUE_SCALE },
 ];
 
+/**
+ * Dev tier thresholds mirror the product's devnet tiers (10/100/500/1000 USD),
+ * enabled only when dev chains are active, so faucet-funded dev wallets prove
+ * real tiers through the same code path. Never used in production.
+ */
+export const DEV_TIERS: readonly TierDefinition[] = [
+  { id: 0, label: "none", minMicroUsd: 0n },
+  { id: 1, label: "$10+", minMicroUsd: 10n * VALUE_SCALE },
+  { id: 2, label: "$100+", minMicroUsd: 100n * VALUE_SCALE },
+  { id: 3, label: "$500+", minMicroUsd: 500n * VALUE_SCALE },
+  { id: 4, label: "$1k+", minMicroUsd: 1_000n * VALUE_SCALE },
+];
+
+/** Tier set to evaluate against; dev thresholds only with SIXFIGS_DEV_CHAINS=1. */
+export function activeTiers(devEnabled: boolean): readonly TierDefinition[] {
+  return devEnabled ? DEV_TIERS : TIERS;
+}
+
+/** Up to three asset symbols are disclosed; each must hold this share. */
+export const MAX_TOP_ASSETS = 3;
+export const TOP_ASSETS_MIN_BPS = 500;
+export const MAX_WALLET_LABEL = 32;
+
 /** Allocation categories used for category-level disclosure. */
 export const ALLOCATION_CATEGORIES = ["stable", "majors", "altcoins", "other"] as const;
 export type AllocationCategory = (typeof ALLOCATION_CATEGORIES)[number];
 
-export const POLICY_VERSION = "6figs-tee-2026-09-d";
+export const POLICY_VERSION = "6figs-tee-2026-10-a";
 
 /** Domain-separation tags. Changing any of these breaks all existing nullifiers. */
 export const DOMAIN = {

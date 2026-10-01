@@ -32,6 +32,9 @@ fi
 if [[ -n "${SIXFIGS_NULLIFIER_KEY:-}" ]]; then
   ENTRIES+="~tee-env-SIXFIGS_NULLIFIER_KEY=${SIXFIGS_NULLIFIER_KEY}"
 fi
+if [[ -n "${SIXFIGS_ESCROW_KEY:-}" ]]; then
+  ENTRIES+="~tee-env-SIXFIGS_ESCROW_KEY=${SIXFIGS_ESCROW_KEY}"
+fi
 if [[ -n "${COINGECKO_API_KEY:-}" ]]; then
   ENTRIES+="~tee-env-COINGECKO_API_KEY=${COINGECKO_API_KEY}"
 fi

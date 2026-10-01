@@ -9,6 +9,8 @@ import { ed25519 } from "@noble/curves/ed25519";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
 import { RegistrationClient } from "../src/client/register.ts";
+import { encryptEscrowBlob } from "../src/client/escrow.ts";
+import { RecheckClient } from "../src/client/recheck.ts";
 import { AttestationVerifier } from "../src/verifier/index.ts";
 import { base58Encode } from "../src/shared/base58.ts";
 import { bytesToHex, utf8 } from "../src/shared/crypto.ts";
@@ -27,13 +29,13 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   return out;
 }
 
-function wallet(): { descriptor: { family: "evm" | "solana"; chainId: number; address: string }; sign: (message: string) => string } {
+function wallet(): { descriptor: { family: "evm" | "solana"; chainId: number; address: string; label?: string }; sign: (message: string) => string } {
   if (family === "evm") {
     const privateKey = secp256k1.utils.randomPrivateKey();
     const publicKey = secp256k1.getPublicKey(privateKey, false);
     const address = `0x${bytesToHex(keccak_256(publicKey.slice(1)).slice(-20))}`;
     return {
-      descriptor: { family: "evm", chainId: 11155111, address },
+      descriptor: { family: "evm", chainId: 11155111, address, label: "MetaMask" },
       sign: (message: string) => {
         const prefix = `\x19Ethereum Signed Message:\n${utf8(message).length}`;
         const digest = keccak_256(concat(utf8(prefix), utf8(message)));
@@ -45,7 +47,7 @@ function wallet(): { descriptor: { family: "evm" | "solana"; chainId: number; ad
   const privateKey = ed25519.utils.randomPrivateKey();
   const address = base58Encode(ed25519.getPublicKey(privateKey));
   return {
-    descriptor: { family: "solana", chainId: 0, address },
+    descriptor: { family: "solana", chainId: 0, address, label: "Phantom" },
     sign: (message: string) => base58Encode(ed25519.sign(utf8(message), privateKey)),
   };
 }
@@ -77,6 +79,29 @@ console.log("registration ok:", {
   tier: body.tier,
   band: body.portfolioBand,
   stableBps: body.stableBps,
+  topAssets: body.topAssets,
   policyVersion: body.policyVersion,
   walletCount: body.walletNullifiers.length,
+});
+
+const escrowBlob = await encryptEscrowBlob(hello.escrowPublicKey, [
+  {
+    family: descriptor.family,
+    chainId: descriptor.chainId,
+    address: descriptor.address,
+    ...(descriptor.label ? { label: descriptor.label } : {}),
+  },
+]);
+const recheckNonce = `smoke-recheck-${Date.now()}`;
+const recheckClient = new RecheckClient({ enclaveUrl: url, policy });
+const rechecked = await recheckClient.recheck({
+  escrowBlob,
+  identityNullifier: body.identityNullifier,
+  nonce: recheckNonce,
+});
+const recheckBody = await verifier.verifyRegistration(rechecked, { expectedNonce: recheckNonce });
+console.log("recheck ok:", {
+  tier: recheckBody.tier,
+  topAssets: recheckBody.topAssets,
+  identityMatches: recheckBody.identityNullifier === body.identityNullifier,
 });

@@ -23,16 +23,18 @@ From `https://confidentialcomputing.googleapis.com`:
 ## Two uses of the token
 
 **1. Key attestation (`GET /hello`).** The enclave generates an ephemeral
-Ed25519 signing key and an X25519 encryption key at boot. It requests a token
-with `nonces = [sha256(ed25519_pubkey || x25519_pubkey)]`. The browser fetches
-`/hello`, verifies the token, recomputes that hash from both advertised keys,
-and checks that it appears in the token. Now the browser knows the key it is
-encrypting to is covered by the attestation — a proxy cannot swap in its own
-encryption key while keeping a genuine token.
+Ed25519 signing key, an ephemeral X25519 encryption key, and a persistent X25519
+escrow key at boot. It requests a token with
+`nonces = [sha256(ed25519_pubkey || x25519_pubkey || escrow_pubkey)]`. The
+browser fetches `/hello`, verifies the token, recomputes that hash from all
+three advertised keys, and checks that it appears in the token. Now the browser
+knows the key it is encrypting to — and the escrow key its address blob is
+encrypted to — is covered by the attestation. A proxy cannot swap in its own
+key while keeping a genuine token.
 
-**2. Result attestation (`POST /registration`).** After computing a tier, the
-enclave signs the canonical result body with its Ed25519 key and requests a
-fresh token with
+**2. Result attestation (`POST /registration`, `POST /recheck`).** After
+computing a tier, the enclave signs the canonical result body with its Ed25519
+key and requests a fresh token with
 
 ```
 nonce = sha256( ed25519_pubkey || "6figs-nonce-v1:" || sha256("6figs-registration-v1|" + canonicalJson(body)) )

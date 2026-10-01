@@ -188,12 +188,15 @@ export async function verifyHello(
   if (sha256Hex(signingKey) !== hello.keyId) {
     throw new Error("hello key id does not match the attested signing key");
   }
+  const escrowKey = base64urlToBytes(hello.escrowPublicKey);
+  if (escrowKey.length !== 32) throw new Error("hello escrow key is malformed");
   const expectedNonce = keyAttestationNonce(
     signingKey,
     base64urlToBytes(hello.encryptionPublicKey),
+    escrowKey,
   );
   if (expectedNonce !== hello.attestation.keyNonce) {
-    throw new Error("hello encryption key is not covered by the attestation");
+    throw new Error("hello keys are not covered by the attestation");
   }
   const nonces = Array.isArray(payload.eat_nonce) ? payload.eat_nonce : [payload.eat_nonce];
   if (!nonces.includes(expectedNonce)) throw new Error("hello attestation nonce mismatch");

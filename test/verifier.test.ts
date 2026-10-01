@@ -46,6 +46,7 @@ async function makeSigned(overrides: Partial<RegistrationResultBody> = {}): Prom
     nextTierFloorMicroUsd: "500000000000",
     portfolioBand: "300k-500k",
     stableBps: 4200,
+    topAssets: ["ETH", "SOL"],
     disclosure: "category",
     allocation: [{ category: "stable", bps: 4200 }],
     walletNullifiers,
@@ -98,6 +99,26 @@ test("verifier accepts a well-formed signed registration", async () => {
   const body = await verifier().verifyRegistration(signed);
   assert.equal(body.tier, 2);
   assert.equal(body.identityNullifier, walletSetNullifier([walletEntry("wallet-a")]));
+});
+
+test("verifier rejects malformed top assets and wallet labels", async () => {
+  const tooMany = await makeSigned({ topAssets: ["A", "B", "C", "D"] });
+  await assert.rejects(
+    () => verifier().verifyRegistration(tooMany.signed),
+    (e: unknown) => e instanceof VerificationError && e.code === "bad_assets",
+  );
+  const longSymbol = await makeSigned({ topAssets: ["USDCUSDCUSDC"] });
+  await assert.rejects(
+    () => verifier().verifyRegistration(longSymbol.signed),
+    (e: unknown) => e instanceof VerificationError && e.code === "bad_assets",
+  );
+  const badLabel = await makeSigned({
+    walletNullifiers: [{ ...walletEntry("wallet-a"), label: "x".repeat(33) }],
+  });
+  await assert.rejects(
+    () => verifier().verifyRegistration(badLabel.signed),
+    (e: unknown) => e instanceof VerificationError && e.code === "bad_label",
+  );
 });
 
 test("verifier rejects a nullifier scheme outside the allowlist", async () => {
@@ -483,5 +504,13 @@ test("verifier hello rejects a substituted encryption key", async () => {
   const manager = new EnclaveKeyManager(attestation, "legacy-v1");
   const hello = await manager.hello("test-policy");
   hello.encryptionPublicKey = bytesToBase64url(randomBytes(32));
+  await assert.rejects(() => verifier().verifyHello(hello));
+});
+
+test("verifier hello rejects a substituted escrow key", async () => {
+  const attestation = new MockAttestationProvider({});
+  const manager = new EnclaveKeyManager(attestation, "legacy-v1");
+  const hello = await manager.hello("test-policy");
+  hello.escrowPublicKey = bytesToBase64url(randomBytes(32));
   await assert.rejects(() => verifier().verifyHello(hello));
 });

@@ -1,10 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { DEV_TIERS } from "../src/shared/constants.ts";
 import {
   assignTier,
   computeAllocation,
   nextTierFloor,
   portfolioBand,
+  topAssetSymbols,
   valueMicroUsd,
 } from "../src/shared/tier.ts";
 
@@ -37,6 +39,49 @@ test("assignTier picks the highest band met", () => {
 test("nextTierFloor exposes the next bound", () => {
   assert.equal(nextTierFloor(1), 300_000n * USD);
   assert.equal(nextTierFloor(4), 0n);
+});
+
+test("dev tiers mirror the product devnet thresholds", () => {
+  assert.equal(assignTier(9n * USD, DEV_TIERS).id, 0);
+  assert.equal(assignTier(10n * USD, DEV_TIERS).id, 1);
+  assert.equal(assignTier(99n * USD, DEV_TIERS).id, 1);
+  assert.equal(assignTier(100n * USD, DEV_TIERS).id, 2);
+  assert.equal(assignTier(500n * USD, DEV_TIERS).id, 3);
+  assert.equal(assignTier(1_000n * USD, DEV_TIERS).id, 4);
+  assert.equal(portfolioBand(250n * USD, DEV_TIERS), "100-500");
+  assert.equal(nextTierFloor(1, DEV_TIERS), 100n * USD);
+});
+
+test("topAssetSymbols discloses at most three symbols above the share floor", () => {
+  const total = 1_000n * USD;
+  const holdings = [
+    { symbol: "eth", valueMicroUsd: 600n * USD },
+    { symbol: "SOL", valueMicroUsd: 300n * USD },
+    { symbol: "usdc", valueMicroUsd: 60n * USD },
+    { symbol: "dust", valueMicroUsd: 10n * USD },
+    { symbol: "😀", valueMicroUsd: 30n * USD },
+  ];
+  assert.deepEqual(topAssetSymbols(holdings, total), ["ETH", "SOL", "USDC"]);
+});
+
+test("topAssetSymbols caps at three, dedupes by symbol, and handles zero", () => {
+  const total = 100n * USD;
+  const holdings = ["A", "B", "C", "D"].map((symbol) => ({
+    symbol,
+    valueMicroUsd: 25n * USD,
+  }));
+  assert.deepEqual(topAssetSymbols(holdings, total), ["A", "B", "C"]);
+  assert.deepEqual(
+    topAssetSymbols(
+      [
+        { symbol: "eth", valueMicroUsd: 40n * USD },
+        { symbol: "ETH", valueMicroUsd: 40n * USD },
+      ],
+      100n * USD,
+    ),
+    ["ETH"],
+  );
+  assert.deepEqual(topAssetSymbols([], 0n), []);
 });
 
 test("portfolioBand is coarse", () => {

@@ -23,9 +23,9 @@ function deriveAesKey(sharedSecret: Uint8Array): Uint8Array {
  * ephemeral ECDH exchange and AES-256-GCM. Only the holder of the matching
  * private key (the enclave) can open it.
  */
-export async function encryptEnvelope(
+export async function encryptEnvelope<T>(
   recipientPublicKey: Uint8Array,
-  payload: EnvelopePayload,
+  payload: T,
 ): Promise<SignedEnvelope> {
   const ephemeralPriv = x25519.utils.randomPrivateKey();
   const ephemeralPub = x25519.getPublicKey(ephemeralPriv);
@@ -54,13 +54,14 @@ export async function encryptEnvelope(
 }
 
 /**
- * Decrypt an envelope with the enclave's X25519 private key. Throws when the
+ * Decrypt an envelope with the matching X25519 private key. Throws when the
  * ciphertext, IV, additional data, or key are wrong — AES-GCM authenticates.
+ * The caller owns payload shape validation.
  */
-export async function decryptEnvelope(
+export async function decryptEnvelope<T = EnvelopePayload>(
   privateKey: Uint8Array,
   envelope: SignedEnvelope,
-): Promise<EnvelopePayload> {
+): Promise<T> {
   if (envelope.v !== 1) throw new Error("unsupported envelope version");
   const ephemeralPub = base64urlToBytes(envelope.epk);
   const iv = base64urlToBytes(envelope.iv);
@@ -87,8 +88,8 @@ export async function decryptEnvelope(
     throw new Error("envelope decryption failed");
   }
 
-  const parsed = JSON.parse(new TextDecoder().decode(plaintext)) as EnvelopePayload;
-  if (!parsed || typeof parsed !== "object" || !parsed.request) {
+  const parsed = JSON.parse(new TextDecoder().decode(plaintext)) as T;
+  if (!parsed || typeof parsed !== "object") {
     throw new Error("malformed envelope payload");
   }
   return parsed;

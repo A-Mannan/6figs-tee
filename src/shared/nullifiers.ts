@@ -56,12 +56,18 @@ export function walletSetNullifier(
 }
 
 export function walletEntriesFromAddresses(
-  wallets: readonly { family: "evm" | "solana"; address: string; chainId?: number }[],
+  wallets: readonly {
+    family: "evm" | "solana";
+    address: string;
+    chainId?: number;
+    label?: string;
+  }[],
   scheme: NullifierScheme = LEGACY_NULLIFIER_SCHEME,
 ): WalletNullifierEntry[] {
   return wallets.map((wallet) => ({
     walletNullifier: scheme.walletNullifier(wallet.family, wallet.address),
     family: wallet.family,
     chainId: wallet.chainId ?? 0,
+    ...(wallet.label ? { label: wallet.label } : {}),
   }));
 }

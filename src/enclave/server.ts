@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { POLICY_VERSION } from "../shared/constants.ts";
 import { decryptEnvelope } from "../shared/envelope.ts";
-import type { SignedEnvelope } from "../shared/types.ts";
+import type { EnvelopePayload, RecheckPayload, SignedEnvelope } from "../shared/types.ts";
 import {
   ConfidentialSpaceAttestationProvider,
   MockAttestationProvider,
@@ -16,7 +16,7 @@ import {
 } from "../shared/nullifiers.ts";
 import { hexToBytes } from "../shared/crypto.ts";
 import { CoinGeckoPricing, type PricingProvider } from "./pricing.ts";
-import { registerPortfolio, RegistrationError } from "./registration.ts";
+import { recheckPortfolio, registerPortfolio, RegistrationError } from "./registration.ts";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_CONCURRENT_REGISTRATIONS = 4;
@@ -49,7 +49,7 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
     });
 
   const nullifier = selectNullifierScheme(env);
-  const keyManager = new EnclaveKeyManager(attestation, nullifier.name);
+  const keyManager = new EnclaveKeyManager(attestation, nullifier.name, env);
   const seenNonces = new SeenNonces();
   const gate = new ConcurrencyGate(MAX_CONCURRENT_REGISTRATIONS);
   const limiter = new FixedWindowRateLimiter(MAX_REGISTRATIONS_PER_MINUTE, 60_000);
@@ -92,6 +92,11 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
 
     if (req.method === "POST" && url.pathname === "/registration") {
       await handleRegistration(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/recheck") {
+      await handleRecheck(req, res);
       return;
     }
 
@@ -149,12 +154,16 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
 
     let payload;
     try {
-      payload = await decryptEnvelope(keyManager.keys.encryptionPrivate, envelope);
+      payload = await decryptEnvelope<EnvelopePayload>(keyManager.keys.encryptionPrivate, envelope);
     } catch {
       writeJson(res, 400, {
         error: "decrypt_failed",
         message: "could not decrypt request envelope",
       });
+      return;
+    }
+    if (!payload || typeof payload !== "object" || !payload.request) {
+      writeJson(res, 400, { error: "bad_envelope", message: "malformed registration payload" });
       return;
     }
 
@@ -175,6 +184,94 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
         pricing,
         nullifier,
         env,
+        escrowPersistent: keyManager.escrowPersistent,
+      });
+      writeJson(res, 200, signed);
+    } catch (error) {
+      if (error instanceof RegistrationError) {
+        if (error.code === "budget_exceeded") {
+          writeJson(res, 503, { error: error.code, message: error.message });
+          return;
+        }
+        writeJson(res, 400, { error: error.code, message: error.message });
+        return;
+      }
+      throw error;
+    }
+  }
+
+  async function handleRecheck(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const clientIp = req.socket.remoteAddress ?? "unknown";
+    if (!limiter.allow(clientIp)) {
+      writeJson(res, 429, {
+        error: "rate_limited",
+        message: "too many requests, try again later",
+      });
+      return;
+    }
+    if (!gate.tryEnter()) {
+      writeJson(res, 503, {
+        error: "server_busy",
+        message: "the enclave is at capacity, try again later",
+      });
+      return;
+    }
+    try {
+      await handleRecheckInner(req, res);
+    } finally {
+      gate.leave();
+    }
+  }
+
+  async function handleRecheckInner(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    let bodyText: string;
+    try {
+      bodyText = await readBody(req);
+    } catch (error) {
+      writeJson(res, 413, {
+        error: "payload_too_large",
+        message: error instanceof Error ? error.message : "body too large",
+      });
+      return;
+    }
+
+    let envelope: SignedEnvelope;
+    try {
+      envelope = JSON.parse(bodyText) as SignedEnvelope;
+    } catch {
+      writeJson(res, 400, { error: "bad_json", message: "body is not valid JSON" });
+      return;
+    }
+
+    let payload: RecheckPayload;
+    try {
+      payload = await decryptEnvelope<RecheckPayload>(
+        keyManager.keys.encryptionPrivate,
+        envelope,
+      );
+    } catch {
+      writeJson(res, 400, {
+        error: "decrypt_failed",
+        message: "could not decrypt request envelope",
+      });
+      return;
+    }
+
+    try {
+      if (typeof payload.nonce !== "string" || seenNonces.seen(payload.nonce)) {
+        writeJson(res, 400, {
+          error: "replay_detected",
+          message: "this request was already processed",
+        });
+        return;
+      }
+      const signed = await recheckPortfolio(payload, {
+        keys: keyManager.keys,
+        attestation,
+        pricing,
+        nullifier,
+        env,
+        escrowPersistent: keyManager.escrowPersistent,
       });
       writeJson(res, 200, signed);
     } catch (error) {

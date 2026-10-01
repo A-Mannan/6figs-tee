@@ -2,12 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { productTierLabel } from "../src/shared/product.ts";
 
-test("productTierLabel maps tee tiers to product labels", () => {
+test("productTierLabel maps tee tiers to product labels one-to-one", () => {
   assert.equal(productTierLabel(0), null);
   assert.equal(productTierLabel(1), "I");
   assert.equal(productTierLabel(2), "II");
-  assert.equal(productTierLabel(3), "II");
-  assert.equal(productTierLabel(4), "III");
+  assert.equal(productTierLabel(3), "III");
+  assert.equal(productTierLabel(4), "IV");
 });
 
 test("productTierLabel fails closed on unknown ids", () => {

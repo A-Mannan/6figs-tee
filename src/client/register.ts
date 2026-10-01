@@ -20,6 +20,8 @@ export interface WalletDescriptor {
   family: "evm" | "solana";
   chainId: number;
   address: string;
+  /** Optional wallet app label (e.g. "Phantom") carried into the result. */
+  label?: string;
 }
 
 export interface PreparedRegistration {
@@ -151,6 +153,7 @@ export class RegistrationClient {
         chainId: wallet.chainId,
         address: wallet.address,
         signature,
+        ...(wallet.label ? { label: wallet.label } : {}),
       };
     });
 
