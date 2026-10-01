@@ -1,4 +1,4 @@
-import { ALLOCATION_CATEGORIES, TIERS, VALUE_SCALE, } from "./constants.js";
+import { ALLOCATION_CATEGORIES, MAX_TOP_ASSETS, MAX_WALLET_LABEL, TIERS, TOP_ASSETS_MIN_BPS, VALUE_SCALE, } from "./constants.js";
 /** Maximum price we will accept for a single unit, in micro-USD. */
 export const MAX_PRICE_MICRO = 100000000n * VALUE_SCALE; // $100M/unit
 /** Balances above this reading are treated as garbage and skipped. */
@@ -21,27 +21,75 @@ export function valueMicroUsd(balanceRaw, priceMicroUsd, decimals) {
     return (balanceRaw * priceMicroUsd) / divisor;
 }
 /** Highest tier whose minimum the total meets. */
-export function assignTier(totalMicroUsd) {
-    let selected = TIERS[0];
-    for (const tier of TIERS) {
+export function assignTier(totalMicroUsd, tiers = TIERS) {
+    let selected = tiers[0];
+    for (const tier of tiers) {
         if (totalMicroUsd >= tier.minMicroUsd)
             selected = tier;
     }
     return selected;
 }
-export function nextTierFloor(tierId) {
-    const next = TIERS.find((t) => t.id === tierId + 1);
+export function nextTierFloor(tierId, tiers = TIERS) {
+    const next = tiers.find((t) => t.id === tierId + 1);
     return next ? next.minMicroUsd : 0n;
 }
 /** Coarse band string. Never reveals the exact total. */
-export function portfolioBand(totalMicroUsd) {
-    const band = assignTier(totalMicroUsd);
+export function portfolioBand(totalMicroUsd, tiers = TIERS) {
+    const band = assignTier(totalMicroUsd, tiers);
     if (band.id === 0)
         return "<100k";
-    const next = nextTierFloor(band.id);
+    const next = nextTierFloor(band.id, tiers);
     if (next === 0n)
         return "1m+";
     return `${short(band.minMicroUsd)}-${short(next)}`;
+}
+/**
+ * Canonical asset symbol for disclosure. Symbols come from untrusted token
+ * contracts, so they are uppercased, stripped to A-Z0-9, and truncated; an
+ * empty result means the asset is skipped rather than shown as a spoof.
+ */
+export function sanitizeAssetSymbol(raw) {
+    const cleaned = raw
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "")
+        .slice(0, 10);
+    return cleaned.length > 0 ? cleaned : null;
+}
+/** Wallet app label (e.g. "Phantom") attached to a binding; printable ASCII. */
+export function sanitizeWalletLabel(raw) {
+    const cleaned = raw
+        .replace(/[^\x20-\x7E]/g, "")
+        .trim()
+        .slice(0, MAX_WALLET_LABEL);
+    return cleaned.length > 0 ? cleaned : null;
+}
+/**
+ * Up to `max` disclosed symbols ordered by value, each holding at least
+ * `minBps` of the total. Amounts never leave this function.
+ */
+export function topAssetSymbols(holdings, totalMicroUsd, options = {}) {
+    const minBps = options.minBps ?? TOP_ASSETS_MIN_BPS;
+    const max = options.max ?? MAX_TOP_ASSETS;
+    if (totalMicroUsd <= 0n)
+        return [];
+    const bySymbol = new Map();
+    for (const holding of holdings) {
+        if (holding.valueMicroUsd <= 0n)
+            continue;
+        const symbol = sanitizeAssetSymbol(holding.symbol);
+        if (!symbol)
+            continue;
+        bySymbol.set(symbol, (bySymbol.get(symbol) ?? 0n) + holding.valueMicroUsd);
+    }
+    return [...bySymbol.entries()]
+        .filter(([, value]) => value * 10000n >= totalMicroUsd * BigInt(minBps))
+        .sort((a, b) => {
+        if (a[1] !== b[1])
+            return a[1] > b[1] ? -1 : 1;
+        return a[0] < b[0] ? -1 : 1;
+    })
+        .slice(0, max)
+        .map(([symbol]) => symbol);
 }
 function short(microUsd) {
     const dollars = microUsd / VALUE_SCALE;

@@ -22,10 +22,13 @@ export declare class CoinGeckoPricing implements PricingProvider {
     private readonly ttlMs;
     private readonly headers;
     private readonly fallback;
+    private readonly chains;
     constructor(options?: {
         apiKey?: string;
         ttlMs?: number;
         fallback?: PricingProvider;
+        /** Include devnet chains; never enable where testnet value matters. */
+        devChains?: boolean;
     });
     quote(balance: RawBalance): Promise<PriceQuote | null>;
     private fetchQuote;

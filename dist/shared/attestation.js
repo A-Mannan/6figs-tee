@@ -1,18 +1,27 @@
 import { ed25519, x25519 } from "@noble/curves/ed25519";
 import { DOMAIN } from "./constants.js";
 import { base64urlToBytes, bytesToBase64url, sha256Hex, utf8 } from "./crypto.js";
-export function generateEnclaveKeys() {
+export function generateEnclaveKeys(escrowPrivate) {
     const signingPrivate = ed25519.utils.randomPrivateKey();
     const signingPublic = ed25519.getPublicKey(signingPrivate);
     const encryptionPrivate = x25519.utils.randomPrivateKey();
     const encryptionPublic = x25519.getPublicKey(encryptionPrivate);
-    return { signingPrivate, signingPublic, encryptionPrivate, encryptionPublic };
+    const escrow = escrowPrivate ?? x25519.utils.randomPrivateKey();
+    return {
+        signingPrivate,
+        signingPublic,
+        encryptionPrivate,
+        encryptionPublic,
+        escrowPrivate: escrow,
+        escrowPublic: x25519.getPublicKey(escrow),
+    };
 }
 export function exportPublicKeys(keys) {
     const signingPublicKey = bytesToBase64url(keys.signingPublic);
     return {
         signingPublicKey,
         encryptionPublicKey: bytesToBase64url(keys.encryptionPublic),
+        escrowPublicKey: bytesToBase64url(keys.escrowPublic),
         keyId: sha256Hex(keys.signingPublic),
     };
 }
@@ -45,9 +54,9 @@ export function keyId(publicKey) {
     return sha256Hex(publicKey);
 }
 /**
- * Nonce for the /hello key attestation. Covers both public keys so a token
- * cannot be relayed with a substituted encryption key.
+ * Nonce for the /hello key attestation. Covers all three public keys so a
+ * token cannot be relayed with a substituted encryption or escrow key.
  */
-export function keyAttestationNonce(signingPublicKey, encryptionPublicKey) {
-    return sha256Hex(concat(signingPublicKey, encryptionPublicKey));
+export function keyAttestationNonce(signingPublicKey, encryptionPublicKey, escrowPublicKey) {
+    return sha256Hex(concat(concat(signingPublicKey, encryptionPublicKey), escrowPublicKey));
 }

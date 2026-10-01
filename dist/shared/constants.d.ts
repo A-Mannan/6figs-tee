@@ -18,10 +18,22 @@ export interface TierDefinition {
  * the band, so a lower-bound tier leaks at most one bit of bucket membership.
  */
 export declare const TIERS: readonly TierDefinition[];
+/**
+ * Dev tier thresholds mirror the product's devnet tiers (10/100/500/1000 USD),
+ * enabled only when dev chains are active, so faucet-funded dev wallets prove
+ * real tiers through the same code path. Never used in production.
+ */
+export declare const DEV_TIERS: readonly TierDefinition[];
+/** Tier set to evaluate against; dev thresholds only with SIXFIGS_DEV_CHAINS=1. */
+export declare function activeTiers(devEnabled: boolean): readonly TierDefinition[];
+/** Up to three asset symbols are disclosed; each must hold this share. */
+export declare const MAX_TOP_ASSETS = 3;
+export declare const TOP_ASSETS_MIN_BPS = 500;
+export declare const MAX_WALLET_LABEL = 32;
 /** Allocation categories used for category-level disclosure. */
 export declare const ALLOCATION_CATEGORIES: readonly ["stable", "majors", "altcoins", "other"];
 export type AllocationCategory = (typeof ALLOCATION_CATEGORIES)[number];
-export declare const POLICY_VERSION = "6figs-tee-2026-09-d";
+export declare const POLICY_VERSION = "6figs-tee-2026-10-a";
 /** Domain-separation tags. Changing any of these breaks all existing nullifiers. */
 export declare const DOMAIN: {
     readonly identity: "6figs-identity-v2";
@@ -79,6 +91,13 @@ export interface ChainConfig {
     readonly defaultRpcEnv: string;
 }
 export declare const CHAINS: readonly ChainConfig[];
+/**
+ * Testnet chains, enabled only when `SIXFIGS_DEV_CHAINS=1`. Devnet assets are
+ * worthless, so these entries must never enter valuation or attestation
+ * policy in production; a reset dev chain can mint arbitrary balances.
+ */
+export declare const DEV_CHAINS: readonly ChainConfig[];
+export declare function activeChains(devEnabled: boolean): readonly ChainConfig[];
 /**
  * There is deliberately no token allowlist. Every token the discovery layer
  * finds is priced; anything the price API cannot quote is skipped rather than

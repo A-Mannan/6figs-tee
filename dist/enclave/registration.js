@@ -1,7 +1,8 @@
-import { DOMAIN, MAX_ASSETS_PER_REQUEST, POLICY_VERSION, walletRemovalChallenge, } from "../shared/constants.js";
+import { activeTiers, DOMAIN, MAX_ASSETS_PER_REQUEST, POLICY_VERSION, walletRemovalChallenge, } from "../shared/constants.js";
+import { decryptEnvelope } from "../shared/envelope.js";
 import { canonicalJson, sha256Bytes, sha256Hex, utf8, } from "../shared/crypto.js";
 import { LEGACY_NULLIFIER_SCHEME, walletEntriesFromAddresses, walletSetNullifier, } from "../shared/nullifiers.js";
-import { assignTier, computeAllocation, nextTierFloor, portfolioBand, valueMicroUsd, } from "../shared/tier.js";
+import { assignTier, computeAllocation, nextTierFloor, portfolioBand, sanitizeWalletLabel, topAssetSymbols, valueMicroUsd, } from "../shared/tier.js";
 import { bindingNonce, exportPublicKeys, signResult, } from "../shared/attestation.js";
 import { verifyOwnership, verifyWalletSignature } from "./ownership.js";
 import { discoverEvmBalances, evmRpcsFromEnv, httpsUrl, } from "./balances.js";
@@ -28,7 +29,8 @@ export async function registerPortfolio(request, deps) {
     }
     const deadline = now + (Number(env.SIXFIGS_REGISTRATION_BUDGET_MS) || DEFAULT_REGISTRATION_BUDGET_MS);
     const removals = request.removals ?? [];
-    const walletNullifiers = walletEntriesFromAddresses(request.wallets, deps.nullifier);
+    const labeledWallets = withLabels(request.wallets);
+    const walletNullifiers = walletEntriesFromAddresses(labeledWallets, deps.nullifier);
     const removedNullifiers = walletEntriesFromAddresses(removals, deps.nullifier);
     const seen = new Set();
     for (const entry of [...walletNullifiers, ...removedNullifiers]) {
@@ -77,7 +79,7 @@ export async function registerPortfolio(request, deps) {
     // request rather than trusting either side.
     let rawBalances;
     try {
-        rawBalances = await collectBalances(request, env, deadline, MAX_ASSETS_PER_REQUEST);
+        rawBalances = await collectBalances(request.wallets, env, deadline, MAX_ASSETS_PER_REQUEST);
     }
     catch (error) {
         if (error instanceof RpcDisagreementError) {
@@ -86,41 +88,22 @@ export async function registerPortfolio(request, deps) {
         throw error;
     }
     // 3. Prices + valuation. Unpriceable assets are skipped, per product spec.
-    const positions = [];
-    let skipped = 0;
-    for (const balance of rawBalances) {
-        if (Date.now() > deadline) {
-            throw new RegistrationError("budget_exceeded", "registration exceeded its time budget");
-        }
-        const quote = await deps.pricing.quote(balance);
-        if (!quote) {
-            skipped++;
-            continue;
-        }
-        const value = valueMicroUsd(balance.balanceRaw, quote.priceMicroUsd, balance.decimals);
-        if (value === null || value <= 0n) {
-            skipped++;
-            continue;
-        }
-        positions.push({
-            category: categoryForPrice(quote.priceMicroUsd),
-            valueMicroUsd: value,
-        });
-    }
+    const valued = await valueBalances(rawBalances, deps.pricing, deadline);
     // 4. Tier, allocation, nullifiers.
-    const { allocation, stableBps, totalMicroUsd } = computeAllocation(positions);
-    const tier = assignTier(totalMicroUsd);
+    const tiers = tiersForEnv(env);
+    const tier = assignTier(valued.totalMicroUsd, tiers);
     const body = {
         v: 1,
         policyVersion: POLICY_VERSION,
         tier: tier.id,
         tierLabel: tier.label,
         tierFloorMicroUsd: tier.minMicroUsd.toString(),
-        nextTierFloorMicroUsd: nextTierFloor(tier.id).toString(),
-        portfolioBand: portfolioBand(totalMicroUsd),
-        stableBps,
+        nextTierFloorMicroUsd: nextTierFloor(tier.id, tiers).toString(),
+        portfolioBand: portfolioBand(valued.totalMicroUsd, tiers),
+        stableBps: valued.stableBps,
+        topAssets: valued.topAssets,
         disclosure: request.disclosure,
-        allocation: request.disclosure === "hidden" ? [] : allocation,
+        allocation: request.disclosure === "hidden" ? [] : valued.allocation,
         walletNullifiers,
         identityNullifier: idNullifier,
         createdAt: now,
@@ -129,10 +112,74 @@ export async function registerPortfolio(request, deps) {
         nullifierScheme: deps.nullifier.name,
         ...(removedNullifiers.length > 0 ? { removedWalletNullifiers: removedNullifiers } : {}),
     };
-    // 5. Sign canonical body with the enclave key.
+    return signBody(body, deps);
+}
+/**
+ * Recheck a stored escrow blob: decrypt with the enclave escrow key, refuse a
+ * blob whose recomputed identity differs from the claimed one, re-fetch
+ * balances and prices, and return a fresh signed, attested result. Possession
+ * of the blob is the capability; no wallet signatures are required.
+ */
+export async function recheckPortfolio(payload, deps) {
+    const env = deps.env ?? process.env;
+    if (!deps.escrowPersistent) {
+        throw new RegistrationError("escrow_unavailable", "escrow key is not persistent; rechecks are disabled");
+    }
+    validateRecheckShape(payload);
+    const now = Date.now();
+    if (Math.abs(now - payload.timestamp) > REQUEST_MAX_AGE_MS) {
+        throw new RegistrationError("stale_request", "request timestamp is outside the freshness window");
+    }
+    const deadline = now + (Number(env.SIXFIGS_REGISTRATION_BUDGET_MS) || DEFAULT_REGISTRATION_BUDGET_MS);
+    const escrow = await decryptEnvelope(deps.keys.escrowPrivate, payload.escrowBlob).catch(() => {
+        throw new RegistrationError("bad_escrow", "escrow blob could not be decrypted");
+    });
+    if (!escrow || escrow.v !== 1 || !Array.isArray(escrow.wallets) || escrow.wallets.length === 0) {
+        throw new RegistrationError("bad_escrow", "escrow payload is malformed");
+    }
+    const wallets = withLabels(escrow.wallets);
+    const walletNullifiers = walletEntriesFromAddresses(wallets, deps.nullifier);
+    const idNullifier = walletSetNullifier(walletNullifiers);
+    if (idNullifier !== payload.identityNullifier) {
+        throw new RegistrationError("identity_mismatch", "escrow blob belongs to a different identity");
+    }
+    let rawBalances;
+    try {
+        rawBalances = await collectBalances(wallets, env, deadline, MAX_ASSETS_PER_REQUEST);
+    }
+    catch (error) {
+        if (error instanceof RpcDisagreementError) {
+            throw new RegistrationError("rpc_disagreement", "redundant RPC providers disagree");
+        }
+        throw error;
+    }
+    const valued = await valueBalances(rawBalances, deps.pricing, deadline);
+    const tiers = tiersForEnv(env);
+    const tier = assignTier(valued.totalMicroUsd, tiers);
+    const body = {
+        v: 1,
+        policyVersion: POLICY_VERSION,
+        tier: tier.id,
+        tierLabel: tier.label,
+        tierFloorMicroUsd: tier.minMicroUsd.toString(),
+        nextTierFloorMicroUsd: nextTierFloor(tier.id, tiers).toString(),
+        portfolioBand: portfolioBand(valued.totalMicroUsd, tiers),
+        stableBps: valued.stableBps,
+        topAssets: valued.topAssets,
+        disclosure: "hidden",
+        allocation: [],
+        walletNullifiers,
+        identityNullifier: idNullifier,
+        createdAt: now,
+        expiresAt: now + RESULT_TTL_MS,
+        nonce: payload.nonce,
+        nullifierScheme: deps.nullifier.name,
+    };
+    return signBody(body, deps);
+}
+async function signBody(body, deps) {
     const canonicalBody = canonicalJson(body);
     const signature = signResult(deps.keys, canonicalBody);
-    // 6. Fresh attestation token binding this exact (key, result) pair.
     const { signingPublicKey, keyId } = exportPublicKeys(deps.keys);
     const payloadHash = sha256Hex(`${DOMAIN.enclaveResult}|${canonicalBody}`);
     const nonce = bindingNonce(deps.keys.signingPublic, payloadHash);
@@ -150,6 +197,64 @@ export async function registerPortfolio(request, deps) {
         attestationToken,
         provider: deps.attestation.kind,
     };
+}
+function tiersForEnv(env) {
+    return activeTiers(env.SIXFIGS_DEV_CHAINS === "1");
+}
+function withLabels(wallets) {
+    return wallets.map((wallet) => {
+        const label = wallet.label ? sanitizeWalletLabel(wallet.label) : null;
+        return {
+            family: wallet.family,
+            address: wallet.address,
+            chainId: wallet.chainId,
+            ...(label ? { label } : {}),
+        };
+    });
+}
+async function valueBalances(rawBalances, pricing, deadline) {
+    const positions = [];
+    const holdings = [];
+    for (const balance of rawBalances) {
+        if (Date.now() > deadline) {
+            throw new RegistrationError("budget_exceeded", "registration exceeded its time budget");
+        }
+        const quote = await pricing.quote(balance);
+        if (!quote)
+            continue;
+        const value = valueMicroUsd(balance.balanceRaw, quote.priceMicroUsd, balance.decimals);
+        if (value === null || value <= 0n)
+            continue;
+        positions.push({
+            category: categoryForPrice(quote.priceMicroUsd),
+            valueMicroUsd: value,
+        });
+        holdings.push({ symbol: balance.symbol, valueMicroUsd: value });
+    }
+    const { allocation, stableBps, totalMicroUsd } = computeAllocation(positions);
+    return {
+        allocation,
+        stableBps,
+        totalMicroUsd,
+        topAssets: topAssetSymbols(holdings, totalMicroUsd),
+    };
+}
+function validateRecheckShape(payload) {
+    if (!payload || typeof payload !== "object") {
+        throw new RegistrationError("bad_request", "malformed recheck payload");
+    }
+    if (typeof payload.nonce !== "string" || payload.nonce.length < 8) {
+        throw new RegistrationError("bad_request", "nonce missing or too short");
+    }
+    if (typeof payload.timestamp !== "number") {
+        throw new RegistrationError("bad_request", "timestamp missing");
+    }
+    if (typeof payload.identityNullifier !== "string" || payload.identityNullifier.length === 0) {
+        throw new RegistrationError("bad_request", "identityNullifier missing");
+    }
+    if (!payload.escrowBlob || typeof payload.escrowBlob !== "object") {
+        throw new RegistrationError("bad_request", "escrowBlob missing");
+    }
 }
 function validateRequestShape(request) {
     if (typeof request.nonce !== "string" || request.nonce.length < 8) {
@@ -188,9 +293,9 @@ function validateRequestShape(request) {
  * the function returns deterministic development balances instead of hitting
  * RPCs, which is what local tests and the mock deployment use.
  */
-async function collectBalances(request, env, deadline, maxAssets) {
+async function collectBalances(wallets, env, deadline, maxAssets) {
     if (env.SIXFIGS_DEV_INSECURE_BALANCES === "1") {
-        return devBalances(request);
+        return devBalances(wallets);
     }
     const evmRpcs = evmRpcsFromEnv(env);
     const solanaRpc = httpsUrl(env.SIXFIGS_RPC_SOLANA);
@@ -203,7 +308,7 @@ async function collectBalances(request, env, deadline, maxAssets) {
             throw error;
         return [];
     });
-    for (const wallet of request.wallets) {
+    for (const wallet of wallets) {
         const remaining = maxAssets - balances.length;
         if (remaining <= 0)
             break;
@@ -226,9 +331,9 @@ async function collectBalances(request, env, deadline, maxAssets) {
     return balances;
 }
 /** Deterministic balances derived from the address, for dev/test only. */
-function devBalances(request) {
+function devBalances(wallets) {
     const out = [];
-    for (const wallet of request.wallets) {
+    for (const wallet of wallets) {
         const hash = sha256Bytes(utf8(wallet.address));
         const base = BigInt(hash[0]);
         if (wallet.family === "solana") {

@@ -39,5 +39,6 @@ export function walletEntriesFromAddresses(wallets, scheme = LEGACY_NULLIFIER_SC
         walletNullifier: scheme.walletNullifier(wallet.family, wallet.address),
         family: wallet.family,
         chainId: wallet.chainId ?? 0,
+        ...(wallet.label ? { label: wallet.label } : {}),
     }));
 }

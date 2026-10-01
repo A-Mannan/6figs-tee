@@ -1,4 +1,4 @@
-import { CHAINS, MAJORS_PRICE_FLOOR_MICRO, PAR_STABLE_BAND_MICRO, VALUE_SCALE, } from "../shared/constants.js";
+import { activeChains, MAJORS_PRICE_FLOOR_MICRO, PAR_STABLE_BAND_MICRO, VALUE_SCALE, } from "../shared/constants.js";
 import { getJson } from "./rpc.js";
 const COINGECKO_BASE = "https://api.coingecko.com/api/v3";
 function usdToMicro(usd) {
@@ -28,12 +28,14 @@ export class CoinGeckoPricing {
     ttlMs;
     headers;
     fallback;
+    chains;
     constructor(options = {}) {
         this.ttlMs = options.ttlMs ?? 120_000;
         this.headers = options.apiKey
             ? { "x-cg-demo-api-key": options.apiKey }
             : {};
         this.fallback = options.fallback ?? null;
+        this.chains = activeChains(options.devChains ?? false);
     }
     async quote(balance) {
         const key = `${balance.family}:${balance.chainId}:${balance.asset.toLowerCase()}`;
@@ -53,7 +55,7 @@ export class CoinGeckoPricing {
         return quote ? capAtPar(quote) : null;
     }
     async nativeQuote(balance) {
-        const chain = CHAINS.find((c) => c.chainId === balance.chainId && c.family === balance.family);
+        const chain = this.chains.find((c) => c.chainId === balance.chainId && c.family === balance.family);
         const id = chain?.nativePriceId;
         if (!id)
             return null;
@@ -74,7 +76,7 @@ export class CoinGeckoPricing {
             const priceMicroUsd = usdToMicro(usd);
             return priceMicroUsd > 0n ? { priceMicroUsd, derived: false } : null;
         }
-        const chain = CHAINS.find((c) => c.chainId === balance.chainId && c.family === "evm");
+        const chain = this.chains.find((c) => c.chainId === balance.chainId && c.family === "evm");
         const platform = chain?.coingeckoPlatform;
         if (!platform)
             return null;

@@ -17,9 +17,29 @@ export const TIERS = [
     { id: 3, label: "$500k+", minMicroUsd: 500000n * VALUE_SCALE },
     { id: 4, label: "$1M+", minMicroUsd: 1000000n * VALUE_SCALE },
 ];
+/**
+ * Dev tier thresholds mirror the product's devnet tiers (10/100/500/1000 USD),
+ * enabled only when dev chains are active, so faucet-funded dev wallets prove
+ * real tiers through the same code path. Never used in production.
+ */
+export const DEV_TIERS = [
+    { id: 0, label: "none", minMicroUsd: 0n },
+    { id: 1, label: "$10+", minMicroUsd: 10n * VALUE_SCALE },
+    { id: 2, label: "$100+", minMicroUsd: 100n * VALUE_SCALE },
+    { id: 3, label: "$500+", minMicroUsd: 500n * VALUE_SCALE },
+    { id: 4, label: "$1k+", minMicroUsd: 1000n * VALUE_SCALE },
+];
+/** Tier set to evaluate against; dev thresholds only with SIXFIGS_DEV_CHAINS=1. */
+export function activeTiers(devEnabled) {
+    return devEnabled ? DEV_TIERS : TIERS;
+}
+/** Up to three asset symbols are disclosed; each must hold this share. */
+export const MAX_TOP_ASSETS = 3;
+export const TOP_ASSETS_MIN_BPS = 500;
+export const MAX_WALLET_LABEL = 32;
 /** Allocation categories used for category-level disclosure. */
 export const ALLOCATION_CATEGORIES = ["stable", "majors", "altcoins", "other"];
-export const POLICY_VERSION = "6figs-tee-2026-09-d";
+export const POLICY_VERSION = "6figs-tee-2026-10-a";
 /** Domain-separation tags. Changing any of these breaks all existing nullifiers. */
 export const DOMAIN = {
     identity: "6figs-identity-v2",
@@ -139,6 +159,26 @@ export const CHAINS = [
         defaultRpcEnv: "SIXFIGS_RPC_SOLANA",
     },
 ];
+/**
+ * Testnet chains, enabled only when `SIXFIGS_DEV_CHAINS=1`. Devnet assets are
+ * worthless, so these entries must never enter valuation or attestation
+ * policy in production; a reset dev chain can mint arbitrary balances.
+ */
+export const DEV_CHAINS = [
+    {
+        family: "evm",
+        chainId: 11155111,
+        name: "sepolia",
+        nativeSymbol: "ETH",
+        nativePriceId: "ethereum",
+        coingeckoPlatform: "ethereum",
+        nativeDecimals: 18,
+        defaultRpcEnv: "SIXFIGS_RPC_SEPOLIA",
+    },
+];
+export function activeChains(devEnabled) {
+    return devEnabled ? [...CHAINS, ...DEV_CHAINS] : CHAINS;
+}
 /**
  * There is deliberately no token allowlist. Every token the discovery layer
  * finds is priced; anything the price API cannot quote is skipped rather than

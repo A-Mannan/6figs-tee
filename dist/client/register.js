@@ -93,6 +93,7 @@ export class RegistrationClient {
                 chainId: wallet.chainId,
                 address: wallet.address,
                 signature,
+                ...(wallet.label ? { label: wallet.label } : {}),
             };
         });
         const removals = prepared.removals.map((wallet) => {

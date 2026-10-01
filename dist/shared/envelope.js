@@ -34,8 +34,9 @@ export async function encryptEnvelope(recipientPublicKey, payload) {
     };
 }
 /**
- * Decrypt an envelope with the enclave's X25519 private key. Throws when the
+ * Decrypt an envelope with the matching X25519 private key. Throws when the
  * ciphertext, IV, additional data, or key are wrong — AES-GCM authenticates.
+ * The caller owns payload shape validation.
  */
 export async function decryptEnvelope(privateKey, envelope) {
     if (envelope.v !== 1)
@@ -62,7 +63,7 @@ export async function decryptEnvelope(privateKey, envelope) {
         throw new Error("envelope decryption failed");
     }
     const parsed = JSON.parse(new TextDecoder().decode(plaintext));
-    if (!parsed || typeof parsed !== "object" || !parsed.request) {
+    if (!parsed || typeof parsed !== "object") {
         throw new Error("malformed envelope payload");
     }
     return parsed;

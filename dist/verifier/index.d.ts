@@ -54,6 +54,14 @@ export declare class AttestationVerifier {
     private requireNonce;
     private checkExpiry;
     private checkTier;
+    /**
+     * Disclosed fields are product-visible, so they are shape-checked strictly:
+     * symbols are short uppercase alphanumerics ([A-Z0-9], 1–10) and wallet
+     * labels are printable ASCII capped at 32. An address can never pass for a
+     * label because ':'/'x' … base58/hex strings exceed 32 chars or contain
+     * characters outside the set.
+     */
+    private checkDisclosures;
     private loadJwks;
     private loadPkiRoot;
 }

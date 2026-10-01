@@ -18,6 +18,7 @@ export interface AttestationProvider {
     buildKeyAttestation(params: {
         signingPublicKey: Uint8Array;
         encryptionPublicKey: Uint8Array;
+        escrowPublicKey: Uint8Array;
     }): Promise<EnclaveKeyAttestation>;
 }
 /** Real provider: talks to the Confidential Space launcher over IPC. */
@@ -31,6 +32,7 @@ export declare class ConfidentialSpaceAttestationProvider implements Attestation
     buildKeyAttestation(params: {
         signingPublicKey: Uint8Array;
         encryptionPublicKey: Uint8Array;
+        escrowPublicKey: Uint8Array;
     }): Promise<EnclaveKeyAttestation>;
 }
 /**
@@ -48,5 +50,6 @@ export declare class MockAttestationProvider implements AttestationProvider {
     buildKeyAttestation(params: {
         signingPublicKey: Uint8Array;
         encryptionPublicKey: Uint8Array;
+        escrowPublicKey: Uint8Array;
     }): Promise<EnclaveKeyAttestation>;
 }

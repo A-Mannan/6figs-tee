@@ -1,4 +1,4 @@
-import { CHAINS, MAX_ASSETS_PER_REQUEST, } from "../shared/constants.js";
+import { activeChains, MAX_ASSETS_PER_REQUEST, } from "../shared/constants.js";
 import { hexToBytes } from "../shared/crypto.js";
 import { jsonRpc, RpcDisagreementError } from "./rpc.js";
 /** Plaintext RPC would let a network observer read and rewrite balance reads. */
@@ -28,7 +28,7 @@ const ERC20_SYMBOL = "0x95d89b41";
 /** Resolve EVM RPC endpoints from the environment, one per chain. */
 export function evmRpcsFromEnv(env = process.env) {
     const out = [];
-    for (const chain of CHAINS) {
+    for (const chain of activeChains(env.SIXFIGS_DEV_CHAINS === "1")) {
         if (chain.family !== "evm")
             continue;
         const url = httpsUrl(env[chain.defaultRpcEnv] ?? env[`${chain.defaultRpcEnv}_URL`]);

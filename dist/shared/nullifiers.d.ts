@@ -30,4 +30,5 @@ export declare function walletEntriesFromAddresses(wallets: readonly {
     family: "evm" | "solana";
     address: string;
     chainId?: number;
+    label?: string;
 }[], scheme?: NullifierScheme): WalletNullifierEntry[];
