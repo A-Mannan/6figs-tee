@@ -13,6 +13,8 @@ export interface EnclavePolicy {
     allowedZones?: string[];
     /** Support attributes that must be present, e.g. ["STABLE"]. */
     requiredSupportAttributes?: string[];
+    /** Escrow key providers the backend will accept, e.g. ["kms"]. */
+    requiredEscrowKeyProviders?: string[];
     /** Whether debug images (dbgstat === "enabled") are acceptable. */
     allowDebug?: boolean;
 }
@@ -49,6 +51,13 @@ export declare class AttestationVerifier {
     }): Promise<RegistrationResultBody>;
     /** Verify the /hello key attestation binds the advertised signing key. */
     verifyHello(hello: EnclaveHello): Promise<void>;
+    /**
+     * Addition results carry exactly three extra fields. They are accepted only
+     * together, must reference an identity that actually changed, and the added
+     * entries must be part of the resulting wallet set. The backend still checks
+     * the transition against its stored bindings; this is the shape gate.
+     */
+    private checkAddition;
     private expectedResultNonce;
     private verifyToken;
     private requireNonce;

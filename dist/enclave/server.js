@@ -27,7 +27,7 @@ export function createEnclaveServer(options = {}) {
             ...(env.SIXFIGS_DEV_CHAINS === "1" ? { devChains: true } : {}),
         });
     const nullifier = selectNullifierScheme(env);
-    const keyManager = new EnclaveKeyManager(attestation, nullifier.name, env);
+    const keyManager = new EnclaveKeyManager(attestation, nullifier.name, env, options.escrowKeyProvider);
     const seenNonces = new SeenNonces();
     const gate = new ConcurrencyGate(MAX_CONCURRENT_REGISTRATIONS);
     const limiter = new FixedWindowRateLimiter(MAX_REGISTRATIONS_PER_MINUTE, 60_000);
@@ -252,7 +252,10 @@ export function createEnclaveServer(options = {}) {
         nullifier,
         attestation,
         pricing,
-        listen() {
+        async listen() {
+            // The escrow key must be resolved before the first request: a
+            // KMS-configured enclave that cannot unwrap its key must not answer.
+            await keyManager.ensureEscrowLoaded();
             const port = options.port ?? Number(env.PORT ?? 8080);
             const host = options.host ?? env.HOST ?? "0.0.0.0";
             return new Promise((resolve) => {

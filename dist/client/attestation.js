@@ -121,6 +121,11 @@ export async function verifyHello(hello, policy = {}) {
     const nonces = Array.isArray(payload.eat_nonce) ? payload.eat_nonce : [payload.eat_nonce];
     if (!nonces.includes(expectedNonce))
         throw new Error("hello attestation nonce mismatch");
+    if (policy.requiredEscrowKeyProviders?.length) {
+        if (!policy.requiredEscrowKeyProviders.includes(hello.escrowKeyProvider)) {
+            throw new Error(`escrow key provider ${String(hello.escrowKeyProvider)} is not allowed`);
+        }
+    }
     return payload;
 }
 /** Verify the attestation attached to a registration response. */

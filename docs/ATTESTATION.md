@@ -32,6 +32,16 @@ knows the key it is encrypting to — and the escrow key its address blob is
 encrypted to — is covered by the attestation. A proxy cannot swap in its own
 key while keeping a genuine token.
 
+The escrow key is loaded through a provider: Cloud KMS by default when
+`SIXFIGS_KMS_KEY` is configured, otherwise the `SIXFIGS_ESCROW_KEY` environment
+fallback (dev/staging only; production refuses it unless
+`SIXFIGS_ALLOW_ENV_ESCROW_KEY=1`), otherwise no persistent material. With KMS,
+the launcher token is exchanged at the GCP Security Token Service for a
+federated access token, an optional service account is impersonated, and Cloud
+KMS unwraps the escrow key — so the wrapped key in deploy config is useless to
+anyone but an attested workload. `/hello` advertises `escrowKeyProvider`
+(`kms` | `env` | `none`) and the KMS key resource; clients can require `kms`.
+
 **2. Result attestation (`POST /registration`, `POST /recheck`).** After
 computing a tier, the enclave signs the canonical result body with its Ed25519
 key and requests a fresh token with
@@ -58,6 +68,10 @@ token cannot be replayed for a different key or a doctored result.
 7. `eat_nonce` contains the expected binding nonce.
 8. `body.policyVersion` matches, `body.nonce` matches the request nonce.
 9. The result is not expired and the tier is in range.
+10. Addition results carry `previousIdentityNullifier`,
+    `addedWalletNullifiers`, and `nextEscrowBlob` as a complete, consistent
+    triple (or carry none of them); the backend then checks the transition
+    against its stored bindings.
 
 Any failure throws `VerificationError`; callers fail closed.
 

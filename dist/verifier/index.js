@@ -58,6 +58,7 @@ export class AttestationVerifier {
                 throw new VerificationError("bad_transition", "a wallet cannot be kept and removed");
             }
         }
+        this.checkAddition(body);
         // 2. The attestation token must be genuine and bound to this key + result.
         const payload = await this.verifyToken(signed.attestationToken, signed.provider);
         const expectedNonce = this.expectedResultNonce(signed.enclavePublicKey, canonicalBody);
@@ -90,6 +91,52 @@ export class AttestationVerifier {
             throw new VerificationError("bad_keyid", "hello keys are not attested");
         }
         this.requireNonce(payload, expectedNonce);
+        if (this.config.policy.requiredEscrowKeyProviders?.length &&
+            !this.config.policy.requiredEscrowKeyProviders.includes(hello.escrowKeyProvider)) {
+            throw new VerificationError("escrow_provider_not_allowed", `escrow key provider ${String(hello.escrowKeyProvider)} is not allowlisted`);
+        }
+    }
+    /**
+     * Addition results carry exactly three extra fields. They are accepted only
+     * together, must reference an identity that actually changed, and the added
+     * entries must be part of the resulting wallet set. The backend still checks
+     * the transition against its stored bindings; this is the shape gate.
+     */
+    checkAddition(body) {
+        const present = [
+            body.previousIdentityNullifier,
+            body.addedWalletNullifiers,
+            body.nextEscrowBlob,
+        ].filter((value) => value !== undefined).length;
+        if (present === 0)
+            return;
+        if (present !== 3) {
+            throw new VerificationError("bad_transition", "addition fields must be present together");
+        }
+        const previous = body.previousIdentityNullifier;
+        if (typeof previous !== "string" || !/^[0-9a-f]{64}$/.test(previous)) {
+            throw new VerificationError("bad_transition", "previous identity is malformed");
+        }
+        if (previous === body.identityNullifier) {
+            throw new VerificationError("bad_transition", "an addition must change the identity");
+        }
+        const added = body.addedWalletNullifiers;
+        if (!Array.isArray(added) || added.length === 0) {
+            throw new VerificationError("bad_transition", "an addition must add at least one wallet");
+        }
+        const kept = new Set(body.walletNullifiers.map((entry) => entry.walletNullifier));
+        for (const entry of added) {
+            if (!kept.has(entry.walletNullifier)) {
+                throw new VerificationError("bad_transition", "an added wallet is missing from the resulting set");
+            }
+        }
+        const blob = body.nextEscrowBlob;
+        if (blob.v !== 1 ||
+            typeof blob.epk !== "string" ||
+            typeof blob.iv !== "string" ||
+            typeof blob.ct !== "string") {
+            throw new VerificationError("bad_transition", "nextEscrowBlob is malformed");
+        }
     }
     expectedResultNonce(enclavePublicKey, canonicalBody) {
         const payloadHash = sha256Hex(`${DOMAIN.enclaveResult}|${canonicalBody}`);
@@ -168,7 +215,11 @@ export class AttestationVerifier {
                 throw new VerificationError("bad_assets", "topAssets contains a malformed symbol");
             }
         }
-        const entries = [...body.walletNullifiers, ...(body.removedWalletNullifiers ?? [])];
+        const entries = [
+            ...body.walletNullifiers,
+            ...(body.removedWalletNullifiers ?? []),
+            ...(body.addedWalletNullifiers ?? []),
+        ];
         for (const entry of entries) {
             if (entry.label !== undefined && !/^[\x20-\x7E]{1,32}$/.test(String(entry.label))) {
                 throw new VerificationError("bad_label", "wallet label is malformed");

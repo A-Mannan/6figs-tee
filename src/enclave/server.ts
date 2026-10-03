@@ -8,6 +8,7 @@ import {
   type AttestationProvider,
 } from "./attestation-provider.ts";
 import { EnclaveKeyManager } from "./keys.ts";
+import type { EscrowKeyProvider } from "./key-provider.ts";
 import { ConcurrencyGate, FixedWindowRateLimiter, SeenNonces } from "./limits.ts";
 import {
   keyedNullifierScheme,
@@ -26,6 +27,8 @@ export interface EnclaveServerOptions {
   env?: NodeJS.ProcessEnv;
   attestation?: AttestationProvider;
   pricing?: PricingProvider;
+  /** Test/DI hook; selected from the environment when omitted. */
+  escrowKeyProvider?: EscrowKeyProvider;
   port?: number;
   host?: string;
 }
@@ -49,7 +52,12 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
     });
 
   const nullifier = selectNullifierScheme(env);
-  const keyManager = new EnclaveKeyManager(attestation, nullifier.name, env);
+  const keyManager = new EnclaveKeyManager(
+    attestation,
+    nullifier.name,
+    env,
+    options.escrowKeyProvider,
+  );
   const seenNonces = new SeenNonces();
   const gate = new ConcurrencyGate(MAX_CONCURRENT_REGISTRATIONS);
   const limiter = new FixedWindowRateLimiter(MAX_REGISTRATIONS_PER_MINUTE, 60_000);
@@ -293,7 +301,10 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
     nullifier,
     attestation,
     pricing,
-    listen(): Promise<{ port: number; host: string }> {
+    async listen(): Promise<{ port: number; host: string }> {
+      // The escrow key must be resolved before the first request: a
+      // KMS-configured enclave that cannot unwrap its key must not answer.
+      await keyManager.ensureEscrowLoaded();
       const port = options.port ?? Number(env.PORT ?? 8080);
       const host = options.host ?? env.HOST ?? "0.0.0.0";
       return new Promise((resolve) => {

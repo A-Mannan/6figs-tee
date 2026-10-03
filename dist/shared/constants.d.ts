@@ -33,7 +33,7 @@ export declare const MAX_WALLET_LABEL = 32;
 /** Allocation categories used for category-level disclosure. */
 export declare const ALLOCATION_CATEGORIES: readonly ["stable", "majors", "altcoins", "other"];
 export type AllocationCategory = (typeof ALLOCATION_CATEGORIES)[number];
-export declare const POLICY_VERSION = "6figs-tee-2026-10-a";
+export declare const POLICY_VERSION = "6figs-tee-2026-10-b";
 /** Domain-separation tags. Changing any of these breaks all existing nullifiers. */
 export declare const DOMAIN: {
     readonly identity: "6figs-identity-v2";
@@ -41,6 +41,7 @@ export declare const DOMAIN: {
     readonly walletV2: "6figs-wallet-v2";
     readonly ownership: "6figs-ownership-v1";
     readonly walletRemoval: "6figs-wallet-removal-v1";
+    readonly walletAddition: "6figs-wallet-add-v1";
     readonly enclaveKey: "6figs-enclave-key-v1";
     readonly enclaveResult: "6figs-registration-v1";
     readonly envelope: "6figs-envelope-v1";
@@ -57,6 +58,20 @@ export declare function ownershipChallenge(params: {
         family: "evm" | "solana";
         address: string;
     }[];
+    timestamp: number;
+    nonce: string;
+}): string;
+/**
+ * Message a wallet signs to join an existing account. Compact by design: it
+ * names the account's identity pseudonym and this wallet only, so the message
+ * does not grow with the stored set and an old wallet is never needed. The
+ * enclave recomputes the account identity from the escrow blob, so a forged
+ * account value cannot redirect the addition.
+ */
+export declare function walletAdditionChallenge(params: {
+    family: "evm" | "solana";
+    address: string;
+    accountIdentityNullifier: string;
     timestamp: number;
     nonce: string;
 }): string;

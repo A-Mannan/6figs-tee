@@ -1,5 +1,5 @@
 import type { Disclosure } from "../shared/constants.ts";
-import type { EnclaveHello, SignedRegistration } from "../shared/types.ts";
+import type { EnclaveHello, SignedEnvelope, SignedRegistration } from "../shared/types.ts";
 import { type ClientAttestationPolicy } from "./attestation.ts";
 export interface WalletDescriptor {
     family: "evm" | "solana";
@@ -20,6 +20,19 @@ export interface PreparedRegistration {
     removals: WalletDescriptor[];
     /** Removal consent string per removed wallet, keyed `family:lowercaseAddress`. */
     removalMessages: Record<string, string>;
+}
+/** Prepared single-signature addition of one or more new wallets. */
+export interface PreparedAddition {
+    nonce: string;
+    timestamp: number;
+    /** The stored account identity being extended (from the backend). */
+    accountIdentityNullifier: string;
+    /** The stored set, ciphertext to the escrow key; forwarded opaquely. */
+    escrowBlob: SignedEnvelope;
+    added: WalletDescriptor[];
+    disclosure: Disclosure;
+    /** Addition consent string per added wallet, keyed `family:lowercaseAddress`. */
+    addMessages: Record<string, string>;
 }
 export interface RegistrationClientOptions {
     enclaveUrl: string;
@@ -65,6 +78,25 @@ export declare class RegistrationClient {
         prepared: PreparedRegistration;
         signatures: Record<string, string>;
         removalSignatures?: Record<string, string>;
+    }): Promise<SignedRegistration>;
+    /**
+     * Phase 1 for an addition: build the compact consent message each added
+     * wallet signs. The stored escrow blob is forwarded opaquely — the browser
+     * never needs the old addresses, and the enclave recomputes the account
+     * identity from the blob before accepting anything.
+     */
+    prepareAddition(input: {
+        added: WalletDescriptor[];
+        escrowBlob: SignedEnvelope;
+        accountIdentityNullifier: string;
+        nonce?: string;
+        disclosure?: Disclosure;
+        timestamp?: number;
+    }): PreparedAddition;
+    /** Phase 2 for an addition: submit only the added wallets' signatures. */
+    submitAddition(input: {
+        prepared: PreparedAddition;
+        signatures: Record<string, string>;
     }): Promise<SignedRegistration>;
 }
 export declare class RegistrationClientError extends Error {

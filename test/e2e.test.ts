@@ -145,8 +145,8 @@ test("end-to-end registration through HTTP", async () => {
   const signedMerged = await client.submit({ prepared: merged, signatures: signAll(merged, keys) });
   await assert.rejects(() => service.submit(signedMerged));
 
-  // Alice removes Bob: every enrolled wallet signs the transition — Alice the
-  // new set, Bob a removal consent — and Bob's wallet is freed.
+  // Removal is not a product path: the enclave can still build the result,
+  // but the trust boundary refuses to persist it.
   const bobKey = `evm:${bob.address.toLowerCase()}`;
   const removal = client.prepare({
     wallets: [descriptor(alice)],
@@ -159,16 +159,100 @@ test("end-to-end registration through HTTP", async () => {
       [bobKey]: signMessage(bob.privateKey, removal.removalMessages[bobKey]!),
     },
   });
-  const removalRecord = await service.submit(signedRemoval);
-  assert.equal((await store.listWallets(removalRecord.identityNullifier)).length, 1);
+  await assert.rejects(() => service.submit(signedRemoval));
+  assert.equal(
+    (await store.listWallets(signedGrown.body.identityNullifier)).length,
+    2,
+    "a rejected removal leaves the stored set untouched",
+  );
+});
 
-  const bobAlone = client.prepare({ wallets: [descriptor(bob)] });
-  const signedBob = await client.submit({
-    prepared: bobAlone,
-    signatures: signAll(bobAlone, keys),
+test("end-to-end wallet addition through HTTP uses only the added signature", async () => {
+  const escrowKey = randomBytes(32);
+  const app = createEnclaveServer({
+    env: {
+      SIXFIGS_MOCK_ATTESTATION: "1",
+      SIXFIGS_DEV_INSECURE_BALANCES: "1",
+      SIXFIGS_ESCROW_KEY: bytesToHex(escrowKey),
+      NODE_ENV: "test",
+    } as NodeJS.ProcessEnv,
+    attestation: new MockAttestationProvider({}),
+    pricing: new StaticPricing({}, 3000),
   });
-  const bobRecord = await service.submit(signedBob);
-  assert.equal((await store.listWallets(bobRecord.identityNullifier)).length, 1);
+  const { port } = await app.listen();
+  after(() => app.server.close());
+
+  const enclaveUrl = `http://127.0.0.1:${port}`;
+  const client = new RegistrationClient({
+    enclaveUrl,
+    policy: { allowMock: true },
+    fetchImpl: fetch,
+  });
+  const alice = evmAccount();
+  const bob = evmAccount();
+  const descriptor = (account: { address: string }) => ({
+    family: "evm" as const,
+    chainId: 1,
+    address: account.address,
+  });
+
+  const store = new InMemoryNullifierStore();
+  const service = new RegistrationService({
+    verifier: new AttestationVerifier({
+      audience: "6figs-registration",
+      allowMock: true,
+      policy: {
+        allowedImageDigests: [],
+        allowedProjects: [],
+        allowedNullifierSchemes: ["legacy-v1"],
+      },
+    }),
+    store,
+  });
+
+  const first = client.prepare({ wallets: [descriptor(alice)] });
+  const signedFirst = await client.submit({
+    prepared: first,
+    signatures: { [`evm:${alice.address.toLowerCase()}`]: signMessage(alice.privateKey, first.message) },
+  });
+  const firstRecord = await service.submit(signedFirst, { requestNonce: first.nonce });
+
+  // The backend hands the browser the stored blob and identity; the browser
+  // adds only Bob's signature.
+  const hello = await client.hello();
+  const escrowBlob = await encryptEscrowBlob(hello.escrowPublicKey, [descriptor(alice)]);
+  const addition = client.prepareAddition({
+    added: [descriptor(bob)],
+    escrowBlob,
+    accountIdentityNullifier: firstRecord.identityNullifier,
+    nonce: "addition-session-nonce",
+  });
+  const bobKey = `evm:${bob.address.toLowerCase()}`;
+  const signedAddition = await client.submitAddition({
+    prepared: addition,
+    signatures: { [bobKey]: signMessage(bob.privateKey, addition.addMessages[bobKey]!) },
+  });
+
+  assert.equal(signedAddition.body.previousIdentityNullifier, firstRecord.identityNullifier);
+  assert.equal(signedAddition.body.addedWalletNullifiers?.length, 1);
+  assert.ok(signedAddition.body.nextEscrowBlob);
+  assert.notEqual(signedAddition.body.identityNullifier, firstRecord.identityNullifier);
+
+  const addedRecord = await service.submit(signedAddition, { requestNonce: addition.nonce });
+  assert.equal((await store.listWallets(addedRecord.identityNullifier)).length, 2);
+
+  // The merged blob the enclave produced must decrypt back to the new set.
+  const recheck = new RecheckClient({
+    enclaveUrl,
+    policy: { allowMock: true },
+    fetchImpl: fetch,
+  });
+  const refreshed = await recheck.recheck({
+    escrowBlob: signedAddition.body.nextEscrowBlob!,
+    identityNullifier: signedAddition.body.identityNullifier,
+    nonce: "recheck-after-addition",
+  });
+  assert.equal(refreshed.body.identityNullifier, signedAddition.body.identityNullifier);
 });
 
 test("mock attestation requires the explicit flag", () => {

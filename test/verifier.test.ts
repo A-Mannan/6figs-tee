@@ -30,7 +30,7 @@ async function makeSigned(overrides: Partial<RegistrationResultBody> = {}): Prom
   canonical: string;
 }> {
   const attestation = new MockAttestationProvider({});
-  const manager = new EnclaveKeyManager(attestation, "legacy-v1");
+  const manager = new EnclaveKeyManager(attestation, "legacy-v1", {});
   const keys = manager.keys;
   const { signingPublicKey, keyId } = exportPublicKeys(keys);
 
@@ -366,7 +366,7 @@ test("verifier rejects a wallet that is both kept and removed", async () => {
   );
 });
 
-test("registration service detaches a wallet when every enrolled wallet signs", async () => {
+test("registration service rejects removal results", async () => {
   const store = new InMemoryNullifierStore();
   const service = new RegistrationService({ verifier: verifier(), store });
 
@@ -379,38 +379,78 @@ test("registration service detaches a wallet when every enrolled wallet signs", 
     walletNullifiers: [walletEntry("wallet-a")],
     removedWalletNullifiers: [walletEntry("wallet-b")],
   });
-  const record = await service.submit(removal.signed);
-
-  assert.equal(record.identityNullifier, walletSetNullifier([walletEntry("wallet-a")]));
-  assert.equal((await store.listWallets(record.identityNullifier)).length, 1);
-  assert.equal(
-    (await store.getWalletOwners([walletEntry("wallet-b").walletNullifier])).size,
-    0,
+  await assert.rejects(
+    () => service.submit(removal.signed),
+    (e: unknown) => e instanceof RegistrationConflict,
   );
-  assert.equal(await store.getIdentity(firstRecord.identityNullifier), null);
+  assert.equal((await store.listWallets(firstRecord.identityNullifier)).length, 2);
 });
 
-test("registration service applies a combined add and remove transition", async () => {
+test("registration service applies an addition bound to the previous identity", async () => {
   const store = new InMemoryNullifierStore();
   const service = new RegistrationService({ verifier: verifier(), store });
 
   const first = await makeSigned({
     walletNullifiers: [walletEntry("wallet-a"), walletEntry("wallet-b")],
   });
-  await service.submit(first.signed);
+  const firstRecord = await service.submit(first.signed);
 
-  const changed = await makeSigned({
-    walletNullifiers: [walletEntry("wallet-a"), walletEntry("wallet-c")],
-    removedWalletNullifiers: [walletEntry("wallet-b")],
+  const addition = await makeSigned({
+    walletNullifiers: [walletEntry("wallet-a"), walletEntry("wallet-b"), walletEntry("wallet-c")],
+    previousIdentityNullifier: firstRecord.identityNullifier,
+    addedWalletNullifiers: [walletEntry("wallet-c")],
+    nextEscrowBlob: { v: 1, epk: "ephemeral", iv: "nonce", ct: "ciphertext" },
   });
-  const record = await service.submit(changed.signed);
+  const record = await service.submit(addition.signed);
 
   const bound = await store.listWallets(record.identityNullifier);
-  assert.equal(bound.length, 2);
-  assert.ok(bound.some((w) => w.walletNullifier === walletEntry("wallet-c").walletNullifier));
-  assert.equal(
-    (await store.getWalletOwners([walletEntry("wallet-b").walletNullifier])).size,
-    0,
+  assert.equal(bound.length, 3);
+  assert.equal(await store.getIdentity(firstRecord.identityNullifier), null);
+});
+
+test("registration service rejects an addition that drops a stored wallet", async () => {
+  const store = new InMemoryNullifierStore();
+  const service = new RegistrationService({ verifier: verifier(), store });
+
+  const first = await makeSigned({
+    walletNullifiers: [walletEntry("wallet-a"), walletEntry("wallet-b")],
+  });
+  const firstRecord = await service.submit(first.signed);
+
+  const bad = await makeSigned({
+    walletNullifiers: [walletEntry("wallet-a"), walletEntry("wallet-b"), walletEntry("wallet-c")],
+    previousIdentityNullifier: walletSetNullifier([walletEntry("wallet-a")]),
+    addedWalletNullifiers: [walletEntry("wallet-b"), walletEntry("wallet-c")],
+    nextEscrowBlob: { v: 1, epk: "ephemeral", iv: "nonce", ct: "ciphertext" },
+  });
+  await assert.rejects(
+    () => service.submit(bad.signed),
+    (e: unknown) => e instanceof RegistrationConflict,
+  );
+  assert.equal((await store.listWallets(firstRecord.identityNullifier)).length, 2);
+});
+
+test("verifier rejects a partial addition triple", async () => {
+  const partial = await makeSigned({
+    previousIdentityNullifier: "ab".repeat(32),
+  });
+  await assert.rejects(
+    () => verifier().verifyRegistration(partial.signed),
+    (e: unknown) => e instanceof VerificationError && e.code === "bad_transition",
+  );
+});
+
+test("verifier rejects an addition that leaves the identity unchanged", async () => {
+  const entries = [walletEntry("wallet-a"), walletEntry("wallet-b")];
+  const noop = await makeSigned({
+    walletNullifiers: entries,
+    previousIdentityNullifier: walletSetNullifier(entries),
+    addedWalletNullifiers: [walletEntry("wallet-b")],
+    nextEscrowBlob: { v: 1, epk: "ephemeral", iv: "nonce", ct: "ciphertext" },
+  });
+  await assert.rejects(
+    () => verifier().verifyRegistration(noop.signed),
+    (e: unknown) => e instanceof VerificationError && e.code === "bad_transition",
   );
 });
 
@@ -492,7 +532,7 @@ test("registration service rejects a set spanning two identities", async () => {
 
 test("verifier hello binds the enclosure key", async () => {
   const attestation = new MockAttestationProvider({});
-  const manager = new EnclaveKeyManager(attestation, "legacy-v1");
+  const manager = new EnclaveKeyManager(attestation, "legacy-v1", {});
   const hello = await manager.hello("test-policy");
   await verifier().verifyHello(hello);
   hello.keyId = "00".repeat(32);
@@ -501,7 +541,7 @@ test("verifier hello binds the enclosure key", async () => {
 
 test("verifier hello rejects a substituted encryption key", async () => {
   const attestation = new MockAttestationProvider({});
-  const manager = new EnclaveKeyManager(attestation, "legacy-v1");
+  const manager = new EnclaveKeyManager(attestation, "legacy-v1", {});
   const hello = await manager.hello("test-policy");
   hello.encryptionPublicKey = bytesToBase64url(randomBytes(32));
   await assert.rejects(() => verifier().verifyHello(hello));
@@ -509,7 +549,7 @@ test("verifier hello rejects a substituted encryption key", async () => {
 
 test("verifier hello rejects a substituted escrow key", async () => {
   const attestation = new MockAttestationProvider({});
-  const manager = new EnclaveKeyManager(attestation, "legacy-v1");
+  const manager = new EnclaveKeyManager(attestation, "legacy-v1", {});
   const hello = await manager.hello("test-policy");
   hello.escrowPublicKey = bytesToBase64url(randomBytes(32));
   await assert.rejects(() => verifier().verifyHello(hello));

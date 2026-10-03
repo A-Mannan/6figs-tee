@@ -15,11 +15,12 @@ export declare class RegistrationService {
      *
      * Membership policy:
      *  - a fresh set is bound to a new identity;
-     *  - adding wallets is allowed only when every enrolled wallet re-signs;
-     *  - removing wallets is allowed only when every enrolled wallet signs the
-     *    transition — kept wallets sign the new set, removed wallets sign a
-     *    removal consent. The previous account is inferred from stored bindings,
-     *    never claimed by the client.
+     *  - an addition carries `previousIdentityNullifier` and is accepted only
+     *    when the stored set is a subset of the new set and the claimed added
+     *    entries are exactly the new wallets;
+     *  - removals are not a product path and are rejected;
+     *  - a full re-prove that grows the set without the addition fields must
+     *    still include every enrolled wallet.
      *
      * The store sequence runs inside one transaction so concurrent submissions
      * for the same account serialize to a coherent state.

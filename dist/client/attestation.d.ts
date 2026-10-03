@@ -7,6 +7,12 @@ export interface ClientAttestationPolicy {
     /** Required support attributes, e.g. ["STABLE"]. */
     requiredSupportAttributes?: string[];
     /**
+     * Escrow key providers to accept, e.g. ["kms"]. When set, a `/hello` whose
+     * provider is not listed fails verification. Production policy should list
+     * only "kms".
+     */
+    requiredEscrowKeyProviders?: string[];
+    /**
      * Accept structurally-valid mock attestations (local development only).
      * Never enable in production: mock tokens are not cryptographically signed.
      */

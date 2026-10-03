@@ -76,20 +76,27 @@ recreate in another zone (`us-central1-c` worked when `-a` and `-f` were
 stocked out); the external IP may change.
 
 `create-vm-dev.sh` forwards `SIXFIGS_RPC_SOLANA`, optional
-`SIXFIGS_RPC_SEPOLIA`, `SIXFIGS_NULLIFIER_KEY`, `COINGECKO_API_KEY`, and
-`SIXFIGS_DEV_INSECURE_BALANCES` as `tee-env-*` metadata. Required in
-`.env.dev`:
+`SIXFIGS_RPC_SEPOLIA`, `SIXFIGS_NULLIFIER_KEY`, `SIXFIGS_ESCROW_KEY`,
+`COINGECKO_API_KEY`, and `SIXFIGS_DEV_INSECURE_BALANCES` as `tee-env-*`
+metadata. When `SIXFIGS_ESCROW_KEY` is set it also sets
+`SIXFIGS_ALLOW_ENV_ESCROW_KEY=1`, because the image runs
+`NODE_ENV=production` and otherwise refuses the environment key. To exercise
+the KMS path instead, set `SIXFIGS_KMS_KEY`, `SIXFIGS_KMS_WRAPPED_ESCROW_KEY`,
+and `SIXFIGS_KMS_STS_AUDIENCE` (optional `SIXFIGS_KMS_SERVICE_ACCOUNT`); the
+dev image allowlist forwards them. Required in `.env.dev`:
 
 ```
 SIXFIGS_RPC_SOLANA=https://api.devnet.solana.com
 SIXFIGS_RPC_SEPOLIA=https://ethereum-sepolia-rpc.publicnode.com
 SIXFIGS_NULLIFIER_KEY=<openssl rand -hex 32>
+SIXFIGS_ESCROW_KEY=<openssl rand -hex 32>   # persistent; keep it across VM recreations
 SIXFIGS_ALLOWED_ORIGIN=http://localhost:3000
 ```
 
-The nullifier key is a dev key. It is visible in VM metadata to anyone with
-`compute.instances.get`; never reuse it and never treat dev nullifiers as
-portable to production.
+The nullifier and escrow keys are dev keys. They are visible in VM metadata to
+anyone with `compute.instances.get`; never reuse them and never treat dev
+nullifiers or blobs as portable to production. Recheck and wallet-addition
+smokes need the same `SIXFIGS_ESCROW_KEY` across VM recreations.
 
 ## Verify
 

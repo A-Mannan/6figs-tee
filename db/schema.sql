@@ -34,11 +34,10 @@ CREATE INDEX IF NOT EXISTS identity_user_idx ON identity (user_id);
 
 -- One row per wallet currently enrolled. The unique constraint on
 -- wallet_nullifier is the sybil gate: a wallet can only ever belong to one
--- identity. Membership changes are transactional and fully consented: on
--- growth every enrolled wallet re-signs and these rows are rebound to the new
--- identity; on removal the kept wallets re-sign and the removed wallets sign a
--- removal consent, after which their rows are deleted so they can be enrolled
--- elsewhere.
+-- identity. Membership changes are transactional and add-only: an addition
+-- carries the new wallet's signature plus the previous identity, the stored
+-- rows are rebound to the new identity, and a wallet's row is never deleted by
+-- the product (removal paths are rejected before reaching this store).
 CREATE TABLE IF NOT EXISTS wallet_nullifier (
   wallet_nullifier  TEXT PRIMARY KEY,
   identity_nullifier TEXT NOT NULL REFERENCES identity (identity_nullifier) ON DELETE CASCADE,

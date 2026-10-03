@@ -34,6 +34,20 @@ if [[ -n "${SIXFIGS_NULLIFIER_KEY:-}" ]]; then
 fi
 if [[ -n "${SIXFIGS_ESCROW_KEY:-}" ]]; then
   ENTRIES+="~tee-env-SIXFIGS_ESCROW_KEY=${SIXFIGS_ESCROW_KEY}"
+  # The image sets NODE_ENV=production, so the dev VM must acknowledge the
+  # environment escrow key explicitly; production policy never sets this.
+  ENTRIES+="~tee-env-SIXFIGS_ALLOW_ENV_ESCROW_KEY=1"
+fi
+if [[ -n "${SIXFIGS_KMS_KEY:-}" ]]; then
+  ENTRIES+="~tee-env-SIXFIGS_KMS_KEY=${SIXFIGS_KMS_KEY}"
+  ENTRIES+="~tee-env-SIXFIGS_KMS_WRAPPED_ESCROW_KEY=${SIXFIGS_KMS_WRAPPED_ESCROW_KEY:?set SIXFIGS_KMS_WRAPPED_ESCROW_KEY with SIXFIGS_KMS_KEY}"
+  ENTRIES+="~tee-env-SIXFIGS_KMS_STS_AUDIENCE=${SIXFIGS_KMS_STS_AUDIENCE:?set SIXFIGS_KMS_STS_AUDIENCE with SIXFIGS_KMS_KEY}"
+  if [[ -n "${SIXFIGS_KMS_SERVICE_ACCOUNT:-}" ]]; then
+    ENTRIES+="~tee-env-SIXFIGS_KMS_SERVICE_ACCOUNT=${SIXFIGS_KMS_SERVICE_ACCOUNT}"
+  fi
+  if [[ -n "${SIXFIGS_KMS_ATTESTATION_AUDIENCE:-}" ]]; then
+    ENTRIES+="~tee-env-SIXFIGS_KMS_ATTESTATION_AUDIENCE=${SIXFIGS_KMS_ATTESTATION_AUDIENCE}"
+  fi
 fi
 if [[ -n "${COINGECKO_API_KEY:-}" ]]; then
   ENTRIES+="~tee-env-COINGECKO_API_KEY=${COINGECKO_API_KEY}"

@@ -15,12 +15,25 @@ export interface WalletInput {
      *  bindings so the profile can name wallets without an address. */
     label?: string;
 }
+/** How an account membership changes. Defaults to "establish" when absent. */
+export type RegistrationMode = "establish" | "add";
 export interface RegistrationRequest {
     /** Anti-replay value, also returned in the attestation token nonces. */
     nonce: string;
     /** Unix ms the request was assembled. Enclave enforces a freshness window. */
     timestamp: number;
-    /** The wallet set to enroll (the new account membership). */
+    /**
+     * "establish" (default) proves a full new set: every wallet signs the
+     * membership challenge. "add" extends the account described by the stored
+     * escrow blob: only the added wallets sign the compact addition challenge.
+     */
+    mode?: RegistrationMode;
+    /** Add mode only: the current set, ciphertext to the enclave escrow key. */
+    escrowBlob?: SignedEnvelope;
+    /** Add mode only: identity the caller is extending; the enclave recomputes
+     *  it from the escrow blob and refuses a mismatch. */
+    baseIdentityNullifier?: string;
+    /** The wallet set after this request (establish: all new; add: added only). */
     wallets: WalletInput[];
     /** Wallets to detach. Each must sign `walletRemovalChallenge` for this transition. */
     removals?: WalletInput[];
@@ -98,6 +111,12 @@ export interface RegistrationResultBody {
     walletNullifiers: WalletNullifierEntry[];
     /** Wallet nullifiers detached by this transition, when removals were requested. */
     removedWalletNullifiers?: WalletNullifierEntry[];
+    /** Add transitions only: the identity this transition extends. */
+    previousIdentityNullifier?: string;
+    /** Add transitions only: the wallets proven by signature in this transition. */
+    addedWalletNullifiers?: WalletNullifierEntry[];
+    /** Add transitions only: the merged set encrypted to the escrow key, for storage. */
+    nextEscrowBlob?: SignedEnvelope;
     /** Nullifier scheme the wallet nullifiers above were derived under. */
     nullifierScheme: NullifierSchemeName;
     identityNullifier: string;
@@ -141,6 +160,10 @@ export interface EnclaveHello {
     encryptionPublicKey: string;
     /** X25519 escrow key that recheck blobs are encrypted to. */
     escrowPublicKey: string;
+    /** Where the escrow private key came from; `none` disables recheck/add. */
+    escrowKeyProvider: "kms" | "env" | "none";
+    /** Cloud KMS key resource when the provider is `kms`. */
+    escrowKeyId?: string;
     /** Nullifier scheme the enclave derives wallet nullifiers under. */
     nullifierScheme: NullifierSchemeName;
     keyId: string;

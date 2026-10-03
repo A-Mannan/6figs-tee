@@ -39,7 +39,7 @@ export const TOP_ASSETS_MIN_BPS = 500;
 export const MAX_WALLET_LABEL = 32;
 /** Allocation categories used for category-level disclosure. */
 export const ALLOCATION_CATEGORIES = ["stable", "majors", "altcoins", "other"];
-export const POLICY_VERSION = "6figs-tee-2026-10-a";
+export const POLICY_VERSION = "6figs-tee-2026-10-b";
 /** Domain-separation tags. Changing any of these breaks all existing nullifiers. */
 export const DOMAIN = {
     identity: "6figs-identity-v2",
@@ -47,6 +47,7 @@ export const DOMAIN = {
     walletV2: "6figs-wallet-v2",
     ownership: "6figs-ownership-v1",
     walletRemoval: "6figs-wallet-removal-v1",
+    walletAddition: "6figs-wallet-add-v1",
     enclaveKey: "6figs-enclave-key-v1",
     enclaveResult: "6figs-registration-v1",
     envelope: "6figs-envelope-v1",
@@ -74,6 +75,27 @@ export function ownershipChallenge(params) {
         `Issued At: ${new Date(params.timestamp).toISOString()}`,
         "",
         "Signing this message proves you control the listed wallets. It moves no funds.",
+    ].join("\n");
+}
+/**
+ * Message a wallet signs to join an existing account. Compact by design: it
+ * names the account's identity pseudonym and this wallet only, so the message
+ * does not grow with the stored set and an old wallet is never needed. The
+ * enclave recomputes the account identity from the escrow blob, so a forged
+ * account value cannot redirect the addition.
+ */
+export function walletAdditionChallenge(params) {
+    const wallet = params.family === "evm" ? params.address.toLowerCase() : params.address;
+    return [
+        "6figs: add a wallet to your account",
+        "",
+        `Domain: ${DOMAIN.walletAddition}`,
+        `Account: ${params.accountIdentityNullifier}`,
+        `Wallet: ${wallet}`,
+        `Nonce: ${params.nonce}`,
+        `Issued At: ${new Date(params.timestamp).toISOString()}`,
+        "",
+        "Signing this adds this wallet to the account. It moves no funds.",
     ].join("\n");
 }
 /**

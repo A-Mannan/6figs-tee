@@ -55,24 +55,33 @@ review replaced it:
 
 - **The account is the wallet set.** No secret exists. Re-signing with the same
   wallets produces the same identity — recovery is automatic.
-- **Growing is explicit.** Adding a wallet produces a new identity; the backend
-  accepts the transition only when every wallet already enrolled is present and
-  signed in the new set.
-- **Removal is explicit and fully consented.** Kept wallets sign the new set;
-  each removed wallet signs a removal consent bound to both the old and the new
-  identity. The backend applies the transition only when kept ∪ removed equals
-  the stored membership and the claimed previous identity matches. An attacker
-  holding a subset of wallets can neither add nor remove anything, and a
-  removed wallet's binding is deleted so it can join another account.
+- **Growing is add-only and email-authorized.** Adding a wallet produces a new
+  identity. The added wallet signs a compact consent bound to the account's
+  identity pseudonym, and the backend accepts the transition only when it can
+  prove against its stored bindings that the new set is a strict superset
+  (previous identity matches the session user, stored wallets all present, and
+  the claimed added wallets are exactly the new ones). Old wallets are not
+  asked to sign; the email session plus control of the added wallet is the
+  authority. The enclave recomputes the previous identity from the stored
+  escrow blob, so a forged base identity fails before any signing.
+- **Removal is not a product path.** The enclave can still build a removal
+  result for protocol compatibility, but the backend rejects any result that
+  carries removed wallets, so no membership can shrink. A wallet binding is
+  never deleted by the product flow.
 - **Losing a wallet is currently unrecoverable.** Recovering with N−1 of N
   wallets needs a threshold policy (and its own risk model); it is deliberately
   not implemented yet.
 - **One wallet, one account.** Wallet nullifiers are unique-indexed; a set
   spanning two existing identities is rejected.
 
-Costs of this model, stated plainly: account security now equals wallet
-security. Whoever holds the wallets (or the seed phrase) is the account. There
-is no second factor and no server-side recovery to appeal to.
+Costs of this model, stated plainly: account security is the email account plus
+the enrolled wallets. Whoever holds the email session and control of one new
+wallet can extend the account (that is what makes additions one-signature);
+whoever holds the wallets can re-prove the full set. The trade was a deliberate
+product decision: requiring every old wallet to sign made additions impossible
+when one was lost and painful otherwise. Email verification, login throttling,
+and password rotation are the compensating controls; establishment still
+requires every wallet.
 
 ## Attack vectors reviewed, and their disposition
 
@@ -88,7 +97,7 @@ is no second factor and no server-side recovery to appeal to.
 | 8 | Dictionary attack: compute the nullifier for public whale addresses and match stored nullifiers | **Partially mitigated** | Keyed nullifiers need the enclave key, so a leaked registry resists offline matching. Legacy rows remain confirmable; rotate to `keyed-v1` and retire them. Keep registration write-only and authenticated regardless. A blind OPRF is the planned upgrade (below). |
 | 9 | Losing the identity secret | **Eliminated** | Secret removed; wallet set is the account. |
 | 10 | Backend-issued IDs / JWTs as the root of identity | Rejected | They make the backend the credential authority and leave it holding a replayable bearer token. Nothing signed or hashed is delegated to the backend. |
-| 11 | Partial wallet compromise adds or removes wallets | Mitigated | Every enrolled wallet must sign the transition: kept wallets sign the new set, removed wallets sign a removal consent bound to both identities; the backend verifies kept ∪ removed equals the stored membership. |
+| 11 | Partial wallet compromise adds or removes wallets | Accepted for additions, rejected for removals | Additions need only the added wallet's signature plus the authenticated session, by product design; the backend still requires a strict superset transition and the enclave re-derives the base identity from the escrow blob. Removals are rejected outright. |
 | 12 | Merging two accounts' wallets | Rejected | Set spanning two owners is a conflict; DB unique constraint is the backstop. |
 | 13 | A wallet is enrolled by two identities | Rejected | `wallet_nullifier` primary key + `bindWallets` conflict check. |
 | 14 | Unknown token-inflation (airdrop a fake token, hope it is valued) | Mitigated | No allowlist, but every asset needs a real price API quote, prices are overflow-checked, and dollar-range assets are capped. Residual risk needs liquidity/volume gates or a signed price feed. |
@@ -164,12 +173,13 @@ The curated `TOKEN_SEEDS` list was deleted. Consequences and replacement rules:
   encryption key is rejected by client and verifier.
 - `identitySecret` removed. `identityNullifier` is the commitment of the signed
   wallet set, recomputed independently by the verifier.
-- Recovery is the wallet set itself; growth requires all enrolled wallets to
-  re-sign; removal requires kept wallets to re-sign plus a domain-separated
-  removal consent from each detached wallet, and deletes its binding.
-  One-wallet-one-account requires the production store to run each submission
-  in one transaction (the reference in-memory store does not); without that,
-  concurrent transitions of one account can interleave.
+- Recovery is the wallet set itself; additions are add-only and need only the
+  added wallet's signature over a compact challenge that binds the account
+  pseudonym and the wallet; the backend enforces superset semantics against its
+  stored bindings and rejects removals. One-wallet-one-account requires the
+  production store to run each submission in one transaction (the reference
+  in-memory store does not); without that, concurrent transitions of one
+  account can interleave.
 - Token allowlist removed. Solana enumerates all token accounts; EVM prefers
   provider token-balance enumeration with a Transfer-log fallback; every
   discovered holding is priced or skipped; par-band cap replaces the seeded
@@ -190,10 +200,12 @@ The curated `TOKEN_SEEDS` list was deleted. Consequences and replacement rules:
 ## Improvements planned
 
 - KMS-backed OPRF nullifiers, closing the dictionary-attack gap.
-- KMS-bound escrow key: the production escrow key must be released only to
-  the attested image, so the "only the enclave can decrypt" claim holds
-  against the operator as well. The dev path (`SIXFIGS_ESCROW_KEY` via tee-env)
-  is explicitly dev-only.
+- KMS-bound escrow key SHIPPED: the enclave unwraps the escrow key through
+  Cloud KMS using the Confidential Space token, workload identity federation,
+  and optional service-account impersonation. Production refuses the
+  `SIXFIGS_ESCROW_KEY` environment path unless
+  `SIXFIGS_ALLOW_ENV_ESCROW_KEY=1`, so the "only the enclave can decrypt"
+  claim is enforced by the KMS IAM policy rather than by the environment.
 - Signed price feed and dual-provider balance reads (or storage proofs).
 - Threshold transition policy so a user who loses one of N wallets can recover
   with N−1 signatures, with a proportional takeover-risk model.
@@ -220,7 +232,10 @@ The curated `TOKEN_SEEDS` list was deleted. Consequences and replacement rules:
 - Never expose an endpoint that answers "is wallet X registered?" and never
   publish the nullifier set.
 - Never accept `identityNullifier` as proof of identity; it is a pseudonym.
-- A wallet-set transition must run inside `runTransaction` and must re-check
-  that every previously enrolled wallet is present in the signed set.
+- A wallet-set transition must run inside `runTransaction`, must re-check that
+  every stored wallet is present in the new set, and must reject any result
+  carrying removed wallets. Additions must additionally check that the claimed
+  added set is exactly new minus stored and that the base identity belongs to
+  the session user.
 - Run at least two enclave VMs behind a load balancer with restart-on-failure;
   no affinity is required (ephemeral keys, no local state).

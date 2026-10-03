@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { ed25519 } from "@noble/curves/ed25519";
 import { secp256k1 } from "@noble/curves/secp256k1";
 import { keccak_256 } from "@noble/hashes/sha3";
-import { ownershipChallenge, walletRemovalChallenge } from "../src/shared/constants.ts";
+import {
+  ownershipChallenge,
+  walletAdditionChallenge,
+  walletRemovalChallenge,
+} from "../src/shared/constants.ts";
+import { encryptEscrowBlob } from "../src/client/escrow.ts";
+import { decryptEnvelope } from "../src/shared/envelope.ts";
 import { base64urlToBytes, canonicalJson, utf8 } from "../src/shared/crypto.ts";
 import {
   exportPublicKeys,
@@ -74,7 +80,7 @@ function buildRequest(wallets: WalletInput[], overrides: Partial<RegistrationReq
 
 function deps(prices: Record<string, number> = {}) {
   const attestation = new MockAttestationProvider({});
-  const keys = new EnclaveKeyManager(attestation, "legacy-v1");
+  const keys = new EnclaveKeyManager(attestation, "legacy-v1", {});
   return {
     keys: keys.keys,
     attestation,
@@ -285,7 +291,7 @@ test("registerPortfolio aborts when the registration budget is exceeded", async 
     },
   };
   const attestation = new MockAttestationProvider({});
-  const keys = new EnclaveKeyManager(attestation, "legacy-v1");
+  const keys = new EnclaveKeyManager(attestation, "legacy-v1", {});
   await assert.rejects(
     () =>
       registerPortfolio(request, {
@@ -319,7 +325,7 @@ test("registerPortfolio derives unguessable nullifiers under the keyed scheme", 
 
   const scheme = keyedNullifierScheme(randomBytes(32));
   const attestation = new MockAttestationProvider({});
-  const keys = new EnclaveKeyManager(attestation, "keyed-v1");
+  const keys = new EnclaveKeyManager(attestation, "keyed-v1", {});
   const run = () =>
     registerPortfolio(request, {
       keys: keys.keys,
@@ -363,10 +369,11 @@ test("wallet and identity nullifiers are deterministic and set-scoped", () => {
 
 test("enclave hello exposes a verifiable key attestation bound to all keys", async () => {
   const attestation = new MockAttestationProvider({});
-  const keys = new EnclaveKeyManager(attestation, "legacy-v1");
+  const keys = new EnclaveKeyManager(attestation, "legacy-v1", {});
   const hello = await keys.hello("test-policy");
   assert.equal(hello.keyId, exportPublicKeys(keys.keys).keyId);
   assert.equal(hello.provider, "mock");
+  assert.equal(hello.escrowKeyProvider, "none");
   assert.ok(hello.attestation.attestationToken.split(".").length === 3);
   assert.equal(
     hello.attestation.keyNonce,
@@ -402,4 +409,177 @@ test("prepare() adopts a caller nonce and it round-trips into body.nonce", async
   });
   const signed = await registerPortfolio(request, deps());
   assert.equal(signed.body.nonce, callerNonce);
+});
+test("registerPortfolio merges an addition from the escrow blob and signs the transition", async () => {
+  const escrowHex = Buffer.from(randomBytes(32)).toString("hex");
+  const attestation = new MockAttestationProvider({});
+  const manager = new EnclaveKeyManager(attestation, "keyed-v1", {
+    SIXFIGS_ESCROW_KEY: escrowHex,
+    NODE_ENV: "test",
+  } as NodeJS.ProcessEnv);
+  await manager.ensureEscrowLoaded();
+  const scheme = keyedNullifierScheme(randomBytes(32));
+
+  const { wallet: existing } = solanaWallet();
+  const { wallet: added, privateKey: addedKey } = solanaWallet();
+  const escrowBlob = await encryptEscrowBlob(exportPublicKeys(manager.keys).escrowPublicKey, [
+    { family: existing.family, chainId: existing.chainId, address: existing.address },
+  ]);
+  const baseIdentity = walletSetNullifier(
+    walletEntriesFromAddresses([existing], scheme),
+  );
+  const timestamp = Date.now();
+  added.signature = signSolana(
+    addedKey,
+    walletAdditionChallenge({
+      family: added.family,
+      address: added.address,
+      accountIdentityNullifier: baseIdentity,
+      timestamp,
+      nonce: "addition-nonce-123",
+    }),
+  );
+
+  const signed = await registerPortfolio(
+    {
+      nonce: "addition-nonce-123",
+      timestamp,
+      mode: "add",
+      escrowBlob,
+      baseIdentityNullifier: baseIdentity,
+      wallets: [added],
+      disclosure: "hidden",
+    },
+    {
+      keys: manager.keys,
+      attestation,
+      pricing: new StaticPricing({}, 2500),
+      nullifier: scheme,
+      escrowPersistent: true,
+      env: { SIXFIGS_DEV_INSECURE_BALANCES: "1" } as NodeJS.ProcessEnv,
+    },
+  );
+
+  assert.equal(signed.body.previousIdentityNullifier, baseIdentity);
+  assert.equal(signed.body.addedWalletNullifiers?.length, 1);
+  assert.equal(signed.body.walletNullifiers.length, 2);
+  assert.notEqual(signed.body.identityNullifier, baseIdentity);
+  assert.equal(signed.body.identityNullifier.length, 64);
+
+  const reopened = await decryptEnvelope<{ v: 1; wallets: Array<{ address: string }> }>(
+    manager.keys.escrowPrivate,
+    signed.body.nextEscrowBlob!,
+  );
+  assert.deepEqual(
+    reopened.wallets.map((wallet) => wallet.address).sort(),
+    [existing.address, added.address].sort(),
+  );
+});
+
+test("registerPortfolio refuses additions without persistent escrow material", async () => {
+  const { wallet: added } = solanaWallet();
+  added.signature = base58Encode(randomBytes(64));
+  await assert.rejects(
+    () =>
+      registerPortfolio(
+        {
+          nonce: "addition-nonce-123",
+          timestamp: Date.now(),
+          mode: "add",
+          escrowBlob: { v: 1, epk: "e", iv: "i", ct: "c" },
+          baseIdentityNullifier: "ab".repeat(32),
+          wallets: [added],
+          disclosure: "hidden",
+        },
+        { ...deps(), escrowPersistent: false },
+      ),
+    (error: unknown) =>
+      error instanceof RegistrationError && error.code === "escrow_unavailable",
+  );
+});
+
+test("registerPortfolio refuses an addition whose blob belongs to another account", async () => {
+  const escrowHex = Buffer.from(randomBytes(32)).toString("hex");
+  const attestation = new MockAttestationProvider({});
+  const manager = new EnclaveKeyManager(attestation, "legacy-v1", {
+    SIXFIGS_ESCROW_KEY: escrowHex,
+    NODE_ENV: "test",
+  } as NodeJS.ProcessEnv);
+  await manager.ensureEscrowLoaded();
+
+  const { wallet: existing } = solanaWallet();
+  const { wallet: added, privateKey: addedKey } = solanaWallet();
+  const escrowBlob = await encryptEscrowBlob(exportPublicKeys(manager.keys).escrowPublicKey, [
+    { family: existing.family, chainId: existing.chainId, address: existing.address },
+  ]);
+  const wrongBase = "ab".repeat(32);
+  added.signature = signSolana(
+    addedKey,
+    walletAdditionChallenge({
+      family: added.family,
+      address: added.address,
+      accountIdentityNullifier: wrongBase,
+      timestamp: Date.now(),
+      nonce: "addition-nonce-123",
+    }),
+  );
+
+  await assert.rejects(
+    () =>
+      registerPortfolio(
+        {
+          nonce: "addition-nonce-123",
+          timestamp: Date.now(),
+          mode: "add",
+          escrowBlob,
+          baseIdentityNullifier: wrongBase,
+          wallets: [added],
+          disclosure: "hidden",
+        },
+        {
+          keys: manager.keys,
+          attestation,
+          pricing: new StaticPricing({}, 2500),
+          nullifier: LEGACY_NULLIFIER_SCHEME,
+          escrowPersistent: true,
+          env: { SIXFIGS_DEV_INSECURE_BALANCES: "1" } as NodeJS.ProcessEnv,
+        },
+      ),
+    (error: unknown) =>
+      error instanceof RegistrationError && error.code === "base_identity_mismatch",
+  );
+});
+
+test("prepareAddition keeps the consent compact and the identity fixed-length", () => {
+  const client = new RegistrationClient({ enclaveUrl: "http://127.0.0.1:1" });
+  const account = "cd".repeat(32);
+  const wallet = {
+    family: "solana" as const,
+    chainId: 0,
+    address: base58Encode(ed25519.getPublicKey(ed25519.utils.randomPrivateKey())),
+  };
+  const prepared = client.prepareAddition({
+    added: [wallet],
+    escrowBlob: { v: 1, epk: "e", iv: "i", ct: "c" },
+    accountIdentityNullifier: account,
+    nonce: "addition-nonce-123",
+  });
+  const message = prepared.addMessages[`solana:${wallet.address.toLowerCase()}`]!;
+  assert.ok(message.includes(account));
+  assert.ok(message.includes(wallet.address));
+  assert.ok(message.includes("addition-nonce-123"));
+  // The message names one wallet regardless of how large the stored set is.
+  assert.ok(message.length < 400, `message too long: ${message.length}`);
+
+  const one = walletSetNullifier(walletEntriesFromAddresses([wallet]));
+  const twenty = walletSetNullifier(
+    walletEntriesFromAddresses(
+      Array.from({ length: 20 }, () => ({
+        family: "solana" as const,
+        address: base58Encode(ed25519.getPublicKey(ed25519.utils.randomPrivateKey())),
+      })),
+    ),
+  );
+  assert.equal(one.length, 64);
+  assert.equal(twenty.length, 64);
 });

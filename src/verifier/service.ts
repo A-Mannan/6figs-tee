@@ -26,11 +26,12 @@ export class RegistrationService {
    *
    * Membership policy:
    *  - a fresh set is bound to a new identity;
-   *  - adding wallets is allowed only when every enrolled wallet re-signs;
-   *  - removing wallets is allowed only when every enrolled wallet signs the
-   *    transition — kept wallets sign the new set, removed wallets sign a
-   *    removal consent. The previous account is inferred from stored bindings,
-   *    never claimed by the client.
+   *  - an addition carries `previousIdentityNullifier` and is accepted only
+   *    when the stored set is a subset of the new set and the claimed added
+   *    entries are exactly the new wallets;
+   *  - removals are not a product path and are rejected;
+   *  - a full re-prove that grows the set without the addition fields must
+   *    still include every enrolled wallet.
    *
    * The store sequence runs inside one transaction so concurrent submissions
    * for the same account serialize to a coherent state.
@@ -50,31 +51,42 @@ export class RegistrationService {
       const kept = body.walletNullifiers;
       const removed = body.removedWalletNullifiers ?? [];
       const keptIds = kept.map((w) => w.walletNullifier);
-      const removedIds = removed.map((w) => w.walletNullifier);
-      const allIds = [...keptIds, ...removedIds];
+      if (removed.length > 0) {
+        throw new RegistrationConflict(removed[0]!.walletNullifier);
+      }
+      const allIds = [...keptIds];
+
+      const previousIdentity = body.previousIdentityNullifier;
+      if (previousIdentity !== undefined) {
+        const previousEntries = await store.listWallets(previousIdentity);
+        if (previousEntries.length === 0 || walletSetNullifier(previousEntries) !== previousIdentity) {
+          throw new RegistrationConflict(keptIds[0]!);
+        }
+        const previousIds = new Set(previousEntries.map((entry) => entry.walletNullifier));
+        const keptSet = new Set(keptIds);
+        if ([...previousIds].some((wallet) => !keptSet.has(wallet))) {
+          throw new RegistrationConflict(keptIds[0]!);
+        }
+        const derivedAdded = keptIds.filter((wallet) => !previousIds.has(wallet));
+        const claimed = new Set(
+          (body.addedWalletNullifiers ?? []).map((entry) => entry.walletNullifier),
+        );
+        if (
+          derivedAdded.length !== claimed.size ||
+          derivedAdded.some((wallet) => !claimed.has(wallet))
+        ) {
+          throw new RegistrationConflict(keptIds[0]!);
+        }
+        await store.migrateWallets(previousIdentity, body.identityNullifier, kept);
+        const record = recordFromBody(body);
+        await store.upsertRegistration(record);
+        return record;
+      }
 
       const owners = await store.getWalletOwners(allIds);
       const previousIdentities = new Set(owners.values());
 
-      if (removed.length > 0) {
-        if (previousIdentities.size !== 1) {
-          throw new RegistrationConflict(allIds[0]!);
-        }
-        const previous = [...previousIdentities][0]!;
-        const previousEntries = await store.listWallets(previous);
-        if (walletSetNullifier(previousEntries) !== previous) {
-          throw new RegistrationConflict(allIds[0]!);
-        }
-        const previousIds = previousEntries.map((entry) => entry.walletNullifier);
-        // Every wallet enrolled before the transition must be accounted for:
-        // either it stays (and re-signed the new set) or it consents to removal.
-        const union = new Set(allIds);
-        const missing = previousIds.filter((wallet) => !union.has(wallet));
-        if (missing.length > 0) throw new RegistrationConflict(missing[0]!);
-        const unenrolled = removedIds.filter((wallet) => !previousIds.includes(wallet));
-        if (unenrolled.length > 0) throw new RegistrationConflict(unenrolled[0]!);
-        await store.migrateWallets(previous, body.identityNullifier, kept, removedIds);
-      } else if (previousIdentities.size === 0) {
+      if (previousIdentities.size === 0) {
         const binding = await store.bindWallets(body.identityNullifier, kept);
         if (!binding.ok) {
           throw new RegistrationConflict(binding.conflict);

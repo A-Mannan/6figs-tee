@@ -94,35 +94,40 @@ result.
 There is no identity secret to persist. The account is the wallet set:
 `prepare()` derives the identity from the wallet addresses, and `submit()`
 encrypts the signed request to the enclave. Re-running with the same wallets
-recovers the same identity; adding a wallet requires every already-enrolled
-wallet to sign again.
+recovers the same identity.
 
-Removing wallets uses the same two-phase flow with per-wallet consent messages:
+Adding a wallet needs one signature — from the new wallet only. Your backend
+returns the stored identity and escrow blob (opaque ciphertext) for the
+authenticated user, and the browser forwards the blob unchanged:
 
 ```ts
-// Keep 2, detach 1. `wallets` ∪ `remove` must be the full current membership.
-const prepared = client.prepare({
-  wallets: [walletA, walletB],
-  remove: [walletC],
+// 1. Backend: GET a session nonce plus { identityNullifier, escrowBlob } for
+//    the verified account.
+const prepared = client.prepareAddition({
+  added: [newWallet],
+  escrowBlob,                    // opaque; fetched from your backend
+  accountIdentityNullifier,      // stored identity (a pseudonym)
+  nonce: backendSessionNonce,    // single-use
 });
 
-// Kept wallets sign prepared.message; each removed wallet signs its own
-// prepared.removalMessages[`family:address`] string.
-const signed = await client.submit({
+// 2. Only the added wallet signs its compact consent message.
+const signature = await signMessage(prepared.addMessages[`evm:${newWallet.address.toLowerCase()}`]);
+
+// 3. Submit; the result binds previous → next identity and carries
+//    nextEscrowBlob, which the backend stores in place of the old blob.
+const signed = await client.submitAddition({
   prepared,
-  signatures: {
-    [`evm:${walletA.toLowerCase()}`]: sigA,
-    [`evm:${walletB.toLowerCase()}`]: sigB,
-  },
-  removalSignatures: {
-    [`evm:${walletC.toLowerCase()}`]: sigCRemoval,
-  },
+  signatures: { [`evm:${newWallet.address.toLowerCase()}`]: signature },
 });
 ```
 
-A detached wallet's binding is deleted by the backend, so it can register a new
-account afterwards. A transition without the removed wallet's consent, without
-all kept wallets signing, or that omits an enrolled wallet is rejected.
+The enclave decrypts the blob with its escrow key, refuses a blob whose
+recomputed identity differs from `accountIdentityNullifier`, verifies only the
+added wallets, merges the set, and re-encrypts it. The backend then verifies
+`previousIdentityNullifier` equals the stored identity, every stored wallet is
+still present, the claimed `addedWalletNullifiers` are exactly the new ones,
+and persists `nextEscrowBlob`. Wallet removal is intentionally not supported:
+the backend rejects any result carrying removed wallets.
 
 ## Backend (NestJS)
 
@@ -190,10 +195,11 @@ Implement `NullifierStore` against `db/schema.sql`:
   wallet_nullifier WHERE wallet_nullifier = ANY($1)`
 - `listWallets` → `SELECT wallet_nullifier, family, chain_id FROM
   wallet_nullifier WHERE identity_nullifier = $1`
-- `migrateWallets` → insert the new identity row first, then `DELETE FROM
-  wallet_nullifier WHERE wallet_nullifier = ANY($removed)`, then `UPDATE
+- `migrateWallets` → insert the new identity row first, then `UPDATE
   wallet_nullifier SET identity_nullifier = $next WHERE wallet_nullifier =
-  ANY($wallets)`, then delete the previous identity row
+  ANY($wallets)`, then delete the previous identity row. (The reference store
+  still accepts a removed set for protocol compatibility; the service rejects
+  removals before calling it, so pass none.)
 - `upsertRegistration` → `INSERT ... ON CONFLICT (identity_nullifier) DO UPDATE`
 
 Implement `runTransaction` as one locked transaction and perform the whole
@@ -211,12 +217,12 @@ COMMIT;
 
 Run each submission in one transaction with the relevant rows locked. The
 unique constraint on `wallet_nullifier` is what enforces one-wallet-one-account;
-`migrateWallets` moves a whole set and must never leave a kept wallet behind,
-and removed rows must be deleted so the wallet is free to re-enroll. The
-service only calls store methods inside `runTransaction` after verifying that
-every wallet previously enrolled is accounted for: kept wallets re-signed the
-new set and removed wallets signed a removal consent. Do not nest
-`runTransaction` calls.
+`migrateWallets` moves a whole set and must never leave a stored wallet behind.
+The service only calls store methods inside `runTransaction` after verifying
+that every stored wallet is present in the new set, that the claimed added
+wallets are exactly new minus stored, and that the base identity matches the
+account being extended. Removals are rejected. Do not nest `runTransaction`
+calls.
 
 ### CI guard
 
@@ -240,7 +246,14 @@ schema:
 | `SIXFIGS_RPC_*_SECONDARY` | enclave | optional redundant RPC per chain; value reads must agree within 0.1% |
 | `SIXFIGS_RPC_SOLANA_SECONDARY` | enclave | redundant Solana RPC, same agreement rule |
 | `SIXFIGS_NULLIFIER_KEY` | enclave | 64-hex secret for keyed nullifiers; required in production |
-| `SIXFIGS_ESCROW_KEY` | enclave | 64-hex persistent escrow key for `/recheck`; required wherever rechecks run (dev: via tee-env allowlist) |
+| `SIXFIGS_ESCROW_KEY` | enclave | 64-hex persistent escrow key for `/recheck` and additions; dev/staging only (production requires `SIXFIGS_ALLOW_ENV_ESCROW_KEY=1` or KMS) |
+| `SIXFIGS_KMS_KEY` | enclave | Cloud KMS key resource that unwraps the escrow key; takes precedence over the env key |
+| `SIXFIGS_KMS_WRAPPED_ESCROW_KEY` | enclave | base64 ciphertext of the 32-byte escrow key, decryptable only by an attested workload |
+| `SIXFIGS_KMS_STS_AUDIENCE` | enclave | workload identity provider audience for the STS exchange |
+| `SIXFIGS_KMS_SERVICE_ACCOUNT` | enclave | optional service account to impersonate before calling KMS |
+| `SIXFIGS_KMS_ATTESTATION_AUDIENCE` | enclave | optional launcher token audience (defaults to the STS audience) |
+| `SIXFIGS_KMS_AAD` | enclave | optional UTF-8 additional authenticated data bound to the wrapped key |
+| `SIXFIGS_ALLOW_ENV_ESCROW_KEY` | enclave | set to `1` to permit the env escrow key in production; dev-only escape hatch |
 | `COINGECKO_API_KEY` | enclave | raises pricing rate limits |
 | `SIXFIGS_ALLOWED_ORIGIN` | enclave | CORS origin; when unset no cross-origin headers are emitted |
 | `SIXFIGS_REGISTRATION_BUDGET_MS` | enclave | dev/test override for the 30 s registration budget (fails closed) |

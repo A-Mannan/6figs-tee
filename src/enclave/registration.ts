@@ -3,9 +3,10 @@ import {
   DOMAIN,
   MAX_ASSETS_PER_REQUEST,
   POLICY_VERSION,
+  walletAdditionChallenge,
   walletRemovalChallenge,
 } from "../shared/constants.ts";
-import { decryptEnvelope } from "../shared/envelope.ts";
+import { decryptEnvelope, encryptEnvelope } from "../shared/envelope.ts";
 import {
   canonicalJson,
   sha256Bytes,
@@ -36,6 +37,7 @@ import type {
   RegistrationResultBody,
   SignedRegistration,
   WalletInput,
+  WalletNullifierEntry,
 } from "../shared/types.ts";
 import type { EnclaveKeys } from "../shared/attestation.ts";
 import {
@@ -87,6 +89,10 @@ export async function registerPortfolio(
 ): Promise<SignedRegistration> {
   const env = deps.env ?? process.env;
   validateRequestShape(request);
+
+  if (request.mode === "add") {
+    return registerAddition(request, deps);
+  }
 
   const now = Date.now();
   if (Math.abs(now - request.timestamp) > REQUEST_MAX_AGE_MS) {
@@ -196,6 +202,164 @@ export async function registerPortfolio(
   };
 
   return signBody(body, deps);
+}
+
+/**
+ * Extend an account by merging added wallets into the set carried by the
+ * stored escrow blob. Only the added wallets sign; the account's authority
+ * comes from the email session on the backend, which checks the transition
+ * against its stored bindings before persisting anything. The old set never
+ * round-trips in plaintext: the enclave decrypts it, recomputes its identity,
+ * and refuses a blob that does not match the claimed base identity.
+ */
+async function registerAddition(
+  request: RegistrationRequest,
+  deps: RegistrationDeps,
+): Promise<SignedRegistration> {
+  const env = deps.env ?? process.env;
+  if (!deps.escrowPersistent) {
+    throw new RegistrationError(
+      "escrow_unavailable",
+      "escrow key is not persistent; additions are disabled",
+    );
+  }
+  if (!request.escrowBlob || typeof request.baseIdentityNullifier !== "string") {
+    throw new RegistrationError(
+      "bad_request",
+      "add mode requires escrowBlob and baseIdentityNullifier",
+    );
+  }
+  if ((request.removals ?? []).length > 0) {
+    throw new RegistrationError("bad_request", "removals are not accepted in add mode");
+  }
+
+  const now = Date.now();
+  if (Math.abs(now - request.timestamp) > REQUEST_MAX_AGE_MS) {
+    throw new RegistrationError("stale_request", "request timestamp is outside the freshness window");
+  }
+  const deadline = now + (Number(env.SIXFIGS_REGISTRATION_BUDGET_MS) || DEFAULT_REGISTRATION_BUDGET_MS);
+
+  const escrow = await decryptEnvelope<EscrowPayload>(
+    deps.keys.escrowPrivate,
+    request.escrowBlob,
+  ).catch(() => {
+    throw new RegistrationError("bad_escrow", "escrow blob could not be decrypted");
+  });
+  if (!escrow || escrow.v !== 1 || !Array.isArray(escrow.wallets) || escrow.wallets.length === 0) {
+    throw new RegistrationError("bad_escrow", "escrow payload is malformed");
+  }
+
+  const existing = withLabels(escrow.wallets);
+  const existingEntries = walletEntriesFromAddresses(existing, deps.nullifier);
+  const baseIdentity = walletSetNullifier(existingEntries);
+  if (baseIdentity !== request.baseIdentityNullifier) {
+    throw new RegistrationError(
+      "base_identity_mismatch",
+      "escrow blob belongs to a different account than claimed",
+    );
+  }
+
+  const existingKeys = new Set(existing.map((wallet) => walletKey(wallet)));
+  const added = withLabels(request.wallets);
+
+  // Only the added wallets prove control, and only over the exact account,
+  // wallet, nonce, and timestamp in the compact challenge.
+  for (const wallet of added) {
+    if (existingKeys.has(walletKey(wallet))) {
+      throw new RegistrationError("already_enrolled", "wallet is already in the account");
+    }
+    const message = walletAdditionChallenge({
+      family: wallet.family,
+      address: wallet.address,
+      accountIdentityNullifier: baseIdentity,
+      timestamp: request.timestamp,
+      nonce: request.nonce,
+    });
+    const result = verifyWalletSignature(wallet, message);
+    if (!result.ok) {
+      throw new RegistrationError(
+        "ownership_failed",
+        `wallet addition check failed: ${result.reason}`,
+      );
+    }
+  }
+
+  // Keyed nullifiers are deterministic per address, so duplicate addresses
+  // within or across the added set would collapse the commitment silently.
+  const merged = [...existing, ...added];
+  if (merged.length > MAX_WALLETS) {
+    throw new RegistrationError("bad_request", `at most ${MAX_WALLETS} wallets are allowed`);
+  }
+  const mergedEntries = walletEntriesFromAddresses(merged, deps.nullifier);
+  const addedEntries = walletEntriesFromAddresses(added, deps.nullifier);
+  assertDistinctNullifiers(mergedEntries);
+
+  let rawBalances: RawBalance[];
+  try {
+    rawBalances = await collectBalances(merged, env, deadline, MAX_ASSETS_PER_REQUEST);
+  } catch (error) {
+    if (error instanceof RpcDisagreementError) {
+      throw new RegistrationError("rpc_disagreement", "redundant RPC providers disagree");
+    }
+    throw error;
+  }
+
+  const valued = await valueBalances(rawBalances, deps.pricing, deadline);
+  const tiers = tiersForEnv(env);
+  const tier = assignTier(valued.totalMicroUsd, tiers);
+
+  // The merged set must survive restarts for the next recheck or addition,
+  // so the enclave re-encrypts it to its own escrow key and signs the blob
+  // into the result for the backend to store.
+  const nextEscrowBlob = await encryptEnvelope<EscrowPayload>(deps.keys.escrowPublic, {
+    v: 1,
+    wallets: merged.map((wallet) => ({
+      family: wallet.family,
+      chainId: wallet.chainId,
+      address: wallet.address,
+      ...(wallet.label ? { label: wallet.label } : {}),
+    })),
+  });
+
+  const identity = walletSetNullifier(mergedEntries);
+  const body: RegistrationResultBody = {
+    v: 1,
+    policyVersion: POLICY_VERSION,
+    tier: tier.id,
+    tierLabel: tier.label,
+    tierFloorMicroUsd: tier.minMicroUsd.toString(),
+    nextTierFloorMicroUsd: nextTierFloor(tier.id, tiers).toString(),
+    portfolioBand: portfolioBand(valued.totalMicroUsd, tiers),
+    stableBps: valued.stableBps,
+    topAssets: valued.topAssets,
+    disclosure: request.disclosure,
+    allocation: request.disclosure === "hidden" ? [] : valued.allocation,
+    walletNullifiers: mergedEntries,
+    previousIdentityNullifier: baseIdentity,
+    addedWalletNullifiers: addedEntries,
+    nextEscrowBlob,
+    identityNullifier: identity,
+    createdAt: now,
+    expiresAt: now + RESULT_TTL_MS,
+    nonce: request.nonce,
+    nullifierScheme: deps.nullifier.name,
+  };
+
+  return signBody(body, deps);
+}
+
+function walletKey(wallet: { family: "evm" | "solana"; address: string }): string {
+  return `${wallet.family}:${wallet.family === "evm" ? wallet.address.toLowerCase() : wallet.address}`;
+}
+
+function assertDistinctNullifiers(entries: readonly WalletNullifierEntry[]): void {
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (seen.has(entry.walletNullifier)) {
+      throw new RegistrationError("duplicate_wallet", "the same wallet was submitted twice");
+    }
+    seen.add(entry.walletNullifier);
+  }
 }
 
 /**
@@ -310,22 +474,17 @@ function tiersForEnv(env: NodeJS.ProcessEnv): ReturnType<typeof activeTiers> {
   return activeTiers(env.SIXFIGS_DEV_CHAINS === "1");
 }
 
-function withLabels(
-  wallets: readonly {
+function withLabels<
+  T extends {
     family: "evm" | "solana";
     address: string;
     chainId: number;
     label?: string;
-  }[],
-): { family: "evm" | "solana"; address: string; chainId: number; label?: string }[] {
+  },
+>(wallets: readonly T[]): T[] {
   return wallets.map((wallet) => {
-    const label = wallet.label ? sanitizeWalletLabel(wallet.label) : null;
-    return {
-      family: wallet.family,
-      address: wallet.address,
-      chainId: wallet.chainId,
-      ...(label ? { label } : {}),
-    };
+    const label = wallet.label ? sanitizeWalletLabel(wallet.label) : undefined;
+    return { ...wallet, label } as T;
   });
 }
 
@@ -386,6 +545,9 @@ function validateRecheckShape(payload: RecheckPayload): void {
 }
 
 function validateRequestShape(request: RegistrationRequest): void {
+  if (request.mode !== undefined && request.mode !== "establish" && request.mode !== "add") {
+    throw new RegistrationError("bad_request", `unsupported registration mode ${String(request.mode)}`);
+  }
   if (typeof request.nonce !== "string" || request.nonce.length < 8) {
     throw new RegistrationError("bad_request", "nonce missing or too short");
   }
