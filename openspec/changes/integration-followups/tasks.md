@@ -56,49 +56,53 @@ Dev-resolvable now; production gates:
 
 ## 2. Backend mailer and recovery (`6FIGS.XYZ_backend`)
 
-- [ ] 2.1 `MailerModule`/`MailerService` with nodemailer SMTP and console dev
+- [x] 2.1 `MailerModule`/`MailerService` with nodemailer SMTP and console dev
   transport; production boot refusal without SMTP (explicit override);
   verified by typecheck/build + dev-link log check
-- [ ] 2.2 Prisma: `User.emailVerifiedAt`, `User.passwordChangedAt`,
+- [x] 2.2 Prisma: `User.emailVerifiedAt`, `User.passwordChangedAt`,
   `EmailToken` (hashed, single-use, expiring); migration applies cleanly;
-  verified by `prisma validate` + `generate` + migration apply
-- [ ] 2.3 Signup verification + resend; forgot/reset; authenticated change;
+  verified by `prisma validate` + `generate` + migration apply on a fresh
+  Postgres
+- [x] 2.3 Signup verification + resend; forgot/reset; authenticated change;
   session invalidation on rotation; rate limits; generic responses; verified
-  by `npm run typecheck`/`build` and route smoke
-- [ ] 2.4 Frontend-facing DTOs include `emailVerified` on session responses;
-  verified by build
+  by `yarn typecheck`/`build` and live route smoke (verify, forgot, reset,
+  change, stale-token 401)
+- [x] 2.4 Frontend-facing DTOs include `emailVerified` on session responses;
+  verified by build + smoke output
 
 ## 3. Backend add persistence and address retirement
 
-- [ ] 3.1 Pin the new tee commit; `TeeService.register` accepts the addition
+- [x] 3.1 Pin the new tee commit; `TeeService.register` accepts the addition
   triple, enforces superset semantics and same-user base identity, replaces
   identity/bindings/blob in one transaction, rejects removals; verified by
-  typecheck/build + a scripted service test or smoke
-- [ ] 3.2 `tee-nonce` response carries `add: { identityNullifier, escrowBlob }`
-  for verified users; verified by build + smoke
-- [ ] 3.3 Drop `Wallet.addressEnc`: migration, remove all reads/writes
+  typecheck/build + live smoke (establish → add → 2 bindings; removal 400)
+- [x] 3.2 `tee-nonce` response carries `add: { identityNullifier, escrowBlob }`
+  for verified users; verified by build + live smoke
+- [x] 3.3 Drop `Wallet.addressEnc`: migration, remove all reads/writes
   (`auth`, `wallet`, `profile`, `eligibility`), delete legacy balance-derived
-  eligibility; verified by schema audit (no address column) + build
-- [ ] 3.4 Docs/env notes for KMS + SMTP + recovery; verified by docs review
+  eligibility; verified by schema audit (`\d "Wallet"` has no addressEnc) +
+  build
+- [x] 3.4 Docs/env notes for KMS + SMTP + recovery (`.env.example`); verified
+  by review
 
 ## 4. Frontend account and addition UX (`6FIGS.XYZ_frontend`)
 
-- [ ] 4.1 Pin the new tee commit; add-wallet-only flow (connect/sign the new
-  wallet, no removal UI); verified by typecheck/lint
-- [ ] 4.2 Account recovery UI: verify banner + resend, forgot/reset pages,
-  change-password form; verified by typecheck/lint
-- [ ] 4.3 Remove legacy totals/address readers left in the tee branch;
-  verified by grep + typecheck
-- [ ] 4.4 Full frontend verification: `npm run typecheck`, `npm run lint`
-  green; `npm run build` green except the pre-existing Google Fonts sandbox
-  failure
+- [x] 4.1 Pin the new tee commit; add-wallet-only flow (connect/sign the new
+  wallet, no removal UI); verified by typecheck/lint/build
+- [x] 4.2 Account recovery UI: verify banner + resend, forgot/reset/verify
+  pages, change-password form; verified by typecheck/lint/build
+- [x] 4.3 Remove legacy totals/address readers left in the tee branch
+  (profile rewritten to the attested view); verified by grep + typecheck
+- [x] 4.4 Full frontend verification: `yarn typecheck`, `yarn lint`,
+  `yarn build` green (10 routes incl. `/reset-password`, `/verify-email`)
 
 ## 5. Verification and handoff
 
 - [x] 5.1 Tee: `npm test`, `npm run typecheck`, `npm run build` green (107/107)
-- [ ] 5.2 Backend: `npm run typecheck`, `build`, `lint`, `prisma validate`
-  green; migration applies on a local Postgres when available
+- [x] 5.2 Backend: `yarn typecheck`, `build`, `lint`, `prisma validate`
+  green; migration applied on a fresh local Postgres + live route smoke
+  (recovery + add + removal rejection)
 - [ ] 5.3 Record dev enclave rebuild needs (new digest if the dev VM is
-  rebuilt) and update `docs/DEV-ENCLAVE.md`
+  rebuilt) and update `docs/DEV-ENCLAVE.md` (doc note added; VM not rebuilt)
 - [x] 5.4 Update `docs/ATTESTATION.md` and `docs/SECURITY.md` for the new
   result fields, KMS trust statement, and add-only trade-off

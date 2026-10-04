@@ -132,6 +132,10 @@ node --experimental-strip-types scripts/smoke-enclave.ts \
 Live instance (2026-10-01): `sixfigs-enclave-dev` in `us-east1-b`,
 `http://34.73.89.203:8080`, digest
 `sha256:2b5f840b2a009940f8a2ba7fdc0654dc8f2620a2542b851bec74cec5073fe232`.
+This VM still runs the pre-`integration-followups` image: it advertises
+`escrowKeyProvider: env` and policy `6figs-tee-2026-10-a`, so the new
+add-wallet flow (policy `6figs-tee-2026-10-b`) will fail against it. Rebuild
+and recreate the VM from the current `main` before dev-testing additions.
 Rebuilding the image changes the digest; recreating the VM may change the IP —
 re-pin both in app configs afterwards.
 
