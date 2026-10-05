@@ -19,7 +19,7 @@ export interface WalletInput {
 }
 
 /** How an account membership changes. Defaults to "establish" when absent. */
-export type RegistrationMode = "establish" | "add";
+export type RegistrationMode = "establish" | "add" | "remove";
 
 export interface RegistrationRequest {
   /** Anti-replay value, also returned in the attestation token nonces. */
@@ -30,16 +30,19 @@ export interface RegistrationRequest {
    * "establish" (default) proves a full new set: every wallet signs the
    * membership challenge. "add" extends the account described by the stored
    * escrow blob: only the added wallets sign the compact addition challenge.
+   * "remove" prunes the stored set: every kept wallet signs the threshold
+   * removal challenge and the removed wallets sign nothing.
    */
   mode?: RegistrationMode;
-  /** Add mode only: the current set, ciphertext to the enclave escrow key. */
+  /** Add/remove mode: the current set, ciphertext to the enclave escrow key. */
   escrowBlob?: SignedEnvelope;
-  /** Add mode only: identity the caller is extending; the enclave recomputes
+  /** Add/remove mode: identity the caller is changing; the enclave recomputes
    *  it from the escrow blob and refuses a mismatch. */
   baseIdentityNullifier?: string;
-  /** The wallet set after this request (establish: all new; add: added only). */
+  /** The wallet set after this request (establish: all new; add: added only;
+   *  remove: kept only, each carrying a signature). */
   wallets: WalletInput[];
-  /** Wallets to detach. Each must sign `walletRemovalChallenge` for this transition. */
+  /** Remove mode: wallets to detach; their signatures are not required. */
   removals?: WalletInput[];
   /** How much portfolio detail the signed result may carry. */
   disclosure: Disclosure;

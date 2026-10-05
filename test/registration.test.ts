@@ -7,6 +7,7 @@ import {
   ownershipChallenge,
   walletAdditionChallenge,
   walletRemovalChallenge,
+  walletThresholdRemovalChallenge,
 } from "../src/shared/constants.ts";
 import { encryptEscrowBlob } from "../src/client/escrow.ts";
 import { decryptEnvelope } from "../src/shared/envelope.ts";
@@ -582,4 +583,238 @@ test("prepareAddition keeps the consent compact and the identity fixed-length", 
   );
   assert.equal(one.length, 64);
   assert.equal(twenty.length, 64);
+});
+
+function escrowManager(escrowHex: string, scheme: "legacy-v1" | "keyed-v1") {
+  const attestation = new MockAttestationProvider({});
+  const manager = new EnclaveKeyManager(attestation, scheme, {
+    SIXFIGS_ESCROW_KEY: escrowHex,
+    NODE_ENV: "test",
+  } as NodeJS.ProcessEnv);
+  return { attestation, manager };
+}
+
+test("registerPortfolio prunes a wallet when every kept wallet signs", async () => {
+  const { attestation, manager } = escrowManager(
+    Buffer.from(randomBytes(32)).toString("hex"),
+    "legacy-v1",
+  );
+  await manager.ensureEscrowLoaded();
+
+  const { wallet: keptWallet, privateKey: keptKey } = evmWallet();
+  const lostWallet = solanaWallet().wallet;
+  const escrowBlob = await encryptEscrowBlob(exportPublicKeys(manager.keys).escrowPublicKey, [
+    { family: keptWallet.family, chainId: keptWallet.chainId, address: keptWallet.address },
+    { family: lostWallet.family, chainId: lostWallet.chainId, address: lostWallet.address },
+  ]);
+  const baseIdentity = walletSetNullifier(
+    walletEntriesFromAddresses([keptWallet, lostWallet], LEGACY_NULLIFIER_SCHEME),
+  );
+  const timestamp = Date.now();
+  const nonce = "removal-nonce-123";
+  const message = walletThresholdRemovalChallenge({
+    accountIdentityNullifier: baseIdentity,
+    removals: [lostWallet],
+    timestamp,
+    nonce,
+  });
+
+  const suppliedKept = { ...keptWallet, signature: signEvm(keptKey, message) };
+  const lostFromBlob = walletEntriesFromAddresses(
+    [lostWallet],
+    LEGACY_NULLIFIER_SCHEME,
+  ).map((entry) => entry.walletNullifier);
+
+  const signed = await registerPortfolio(
+    {
+      nonce,
+      timestamp,
+      mode: "remove",
+      escrowBlob,
+      baseIdentityNullifier: baseIdentity,
+      wallets: [suppliedKept],
+      removals: [{ ...lostWallet, signature: "" }],
+      disclosure: "hidden",
+    },
+    {
+      keys: manager.keys,
+      attestation,
+      pricing: new StaticPricing({}, 2500),
+      nullifier: LEGACY_NULLIFIER_SCHEME,
+      escrowPersistent: true,
+      env: { SIXFIGS_DEV_INSECURE_BALANCES: "1" } as NodeJS.ProcessEnv,
+    },
+  );
+
+  assert.equal(signed.body.previousIdentityNullifier, baseIdentity);
+  assert.equal(signed.body.walletNullifiers.length, 1);
+  assert.deepEqual(
+    signed.body.removedWalletNullifiers?.map((entry) => entry.walletNullifier),
+    lostFromBlob,
+  );
+  assert.notEqual(signed.body.identityNullifier, baseIdentity);
+
+  const reopened = await decryptEnvelope<{ v: 1; wallets: Array<{ address: string }> }>(
+    manager.keys.escrowPrivate,
+    signed.body.nextEscrowBlob!,
+  );
+  assert.deepEqual(
+    reopened.wallets.map((wallet) => wallet.address),
+    [keptWallet.address],
+  );
+});
+
+test("registerPortfolio refuses a removal missing a kept wallet signature", async () => {
+  const { attestation, manager } = escrowManager(
+    Buffer.from(randomBytes(32)).toString("hex"),
+    "legacy-v1",
+  );
+  await manager.ensureEscrowLoaded();
+
+  const keptWallet = evmWallet().wallet;
+  const lostWallet = solanaWallet().wallet;
+  const escrowBlob = await encryptEscrowBlob(exportPublicKeys(manager.keys).escrowPublicKey, [
+    { family: keptWallet.family, chainId: keptWallet.chainId, address: keptWallet.address },
+    { family: lostWallet.family, chainId: lostWallet.chainId, address: lostWallet.address },
+  ]);
+  const baseIdentity = walletSetNullifier(
+    walletEntriesFromAddresses([keptWallet, lostWallet], LEGACY_NULLIFIER_SCHEME),
+  );
+
+  await assert.rejects(
+    () =>
+      registerPortfolio(
+        {
+          nonce: "removal-nonce-123",
+          timestamp: Date.now(),
+          mode: "remove",
+          escrowBlob,
+          baseIdentityNullifier: baseIdentity,
+          wallets: [{ ...keptWallet, signature: "00" }],
+          removals: [{ ...lostWallet, signature: "" }],
+          disclosure: "hidden",
+        },
+        {
+          keys: manager.keys,
+          attestation,
+          pricing: new StaticPricing({}, 2500),
+          nullifier: LEGACY_NULLIFIER_SCHEME,
+          escrowPersistent: true,
+          env: { SIXFIGS_DEV_INSECURE_BALANCES: "1" } as NodeJS.ProcessEnv,
+        },
+      ),
+    (error: unknown) =>
+      error instanceof RegistrationError && error.code === "ownership_failed",
+  );
+});
+
+test("registerPortfolio refuses removing an unknown wallet or every wallet", async () => {
+  const { attestation, manager } = escrowManager(
+    Buffer.from(randomBytes(32)).toString("hex"),
+    "legacy-v1",
+  );
+  await manager.ensureEscrowLoaded();
+
+  const only = evmWallet().wallet;
+  const { wallet: unknown } = solanaWallet();
+  const escrowBlob = await encryptEscrowBlob(exportPublicKeys(manager.keys).escrowPublicKey, [
+    { family: only.family, chainId: only.chainId, address: only.address },
+  ]);
+  const baseIdentity = walletSetNullifier(
+    walletEntriesFromAddresses([only], LEGACY_NULLIFIER_SCHEME),
+  );
+  const depsForRemoval = {
+    keys: manager.keys,
+    attestation,
+    pricing: new StaticPricing({}, 2500),
+    nullifier: LEGACY_NULLIFIER_SCHEME,
+    escrowPersistent: true,
+    env: { SIXFIGS_DEV_INSECURE_BALANCES: "1" } as NodeJS.ProcessEnv,
+  };
+
+  await assert.rejects(
+    () =>
+      registerPortfolio(
+        {
+          nonce: "removal-nonce-123",
+          timestamp: Date.now(),
+          mode: "remove",
+          escrowBlob,
+          baseIdentityNullifier: baseIdentity,
+          wallets: [{ ...only, signature: "00" }],
+          removals: [{ ...unknown, signature: "" }],
+          disclosure: "hidden",
+        },
+        depsForRemoval,
+      ),
+    (error: unknown) =>
+      error instanceof RegistrationError && error.code === "unknown_wallet",
+  );
+
+  await assert.rejects(
+    () =>
+      registerPortfolio(
+        {
+          nonce: "removal-nonce-123",
+          timestamp: Date.now(),
+          mode: "remove",
+          escrowBlob,
+          baseIdentityNullifier: baseIdentity,
+          wallets: [{ ...only, signature: "00" }],
+          removals: [{ ...only, signature: "" }],
+          disclosure: "hidden",
+        },
+        depsForRemoval,
+      ),
+    (error: unknown) =>
+      error instanceof RegistrationError && error.code === "bad_request",
+  );
+});
+
+test("registerPortfolio refuses removals without persistent escrow material", async () => {
+  const { wallet: lost } = solanaWallet();
+  await assert.rejects(
+    () =>
+      registerPortfolio(
+        {
+          nonce: "removal-nonce-123",
+          timestamp: Date.now(),
+          mode: "remove",
+          escrowBlob: { v: 1, epk: "e", iv: "i", ct: "c" },
+          baseIdentityNullifier: "ab".repeat(32),
+          wallets: [lost],
+          removals: [{ ...lost, signature: "" }],
+          disclosure: "hidden",
+        },
+        { ...deps(), escrowPersistent: false },
+      ),
+    (error: unknown) =>
+      error instanceof RegistrationError && error.code === "escrow_unavailable",
+  );
+});
+
+test("prepareRemoval names the removed wallets and the account", () => {
+  const client = new RegistrationClient({ enclaveUrl: "http://127.0.0.1:1" });
+  const account = "ef".repeat(32);
+  const kept = {
+    family: "solana" as const,
+    chainId: 0,
+    address: base58Encode(ed25519.getPublicKey(ed25519.utils.randomPrivateKey())),
+  };
+  const lost = {
+    family: "solana" as const,
+    chainId: 0,
+    address: base58Encode(ed25519.getPublicKey(ed25519.utils.randomPrivateKey())),
+  };
+  const prepared = client.prepareRemoval({
+    kept: [kept],
+    remove: [lost],
+    escrowBlob: { v: 1, epk: "e", iv: "i", ct: "c" },
+    accountIdentityNullifier: account,
+    nonce: "removal-nonce-123",
+  });
+  assert.ok(prepared.message.includes(account));
+  assert.ok(prepared.message.includes(lost.address));
+  assert.ok(prepared.message.includes("removal-nonce-123"));
+  assert.ok(prepared.message.length < 500);
 });

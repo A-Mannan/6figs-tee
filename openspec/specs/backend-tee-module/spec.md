@@ -31,11 +31,17 @@ The system SHALL verify each submitted `SignedRegistration` with the tee verifie
 
 ### Requirement: Escrow blob is opaque and replaceable
 
-The system SHALL store the escrow blob as ciphertext without parsing it, and SHALL replace it atomically with the bindings on every successful membership transition.
+The system SHALL store the escrow blob as ciphertext without parsing it, and
+SHALL replace it atomically with the bindings on every successful addition,
+using the enclave-produced merged blob.
+
+#### Scenario: Wallet added
+- **WHEN** an addition persists
+- **THEN** the stored blob describes the merged wallet set, remains ciphertext to the backend, and the bindings are replaced in the same transaction
 
 #### Scenario: Wallet removed
-- **WHEN** a transition removes a wallet
-- **THEN** the stored blob describes only the new wallet set and the old binding is gone
+- **WHEN** a result removes a wallet
+- **THEN** the backend rejects it, the stored blob is unchanged, and no binding is deleted
 
 ### Requirement: TTL re-verification
 

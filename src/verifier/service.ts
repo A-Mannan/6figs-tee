@@ -51,33 +51,52 @@ export class RegistrationService {
       const kept = body.walletNullifiers;
       const removed = body.removedWalletNullifiers ?? [];
       const keptIds = kept.map((w) => w.walletNullifier);
-      if (removed.length > 0) {
-        throw new RegistrationConflict(removed[0]!.walletNullifier);
-      }
-      const allIds = [...keptIds];
+      const removedIds = removed.map((w) => w.walletNullifier);
+      const allIds = [...keptIds, ...removedIds];
 
       const previousIdentity = body.previousIdentityNullifier;
       if (previousIdentity !== undefined) {
         const previousEntries = await store.listWallets(previousIdentity);
         if (previousEntries.length === 0 || walletSetNullifier(previousEntries) !== previousIdentity) {
-          throw new RegistrationConflict(keptIds[0]!);
+          throw new RegistrationConflict(keptIds[0] ?? removedIds[0]!);
         }
         const previousIds = new Set(previousEntries.map((entry) => entry.walletNullifier));
         const keptSet = new Set(keptIds);
-        if ([...previousIds].some((wallet) => !keptSet.has(wallet))) {
-          throw new RegistrationConflict(keptIds[0]!);
+
+        if (removed.length > 0) {
+          // Removal: stored = kept ∪ removed exactly, with at least one kept.
+          if (keptIds.length === 0) throw new RegistrationConflict(removedIds[0]!);
+          const union = new Set(allIds);
+          if (
+            union.size !== previousIds.size ||
+            [...previousIds].some((wallet) => !union.has(wallet)) ||
+            removedIds.some((wallet) => !previousIds.has(wallet))
+          ) {
+            throw new RegistrationConflict(removedIds[0]!);
+          }
+          await store.migrateWallets(
+            previousIdentity,
+            body.identityNullifier,
+            kept,
+            removedIds,
+          );
+        } else {
+          // Addition: strict superset with the claimed added set.
+          if ([...previousIds].some((wallet) => !keptSet.has(wallet))) {
+            throw new RegistrationConflict(keptIds[0]!);
+          }
+          const derivedAdded = keptIds.filter((wallet) => !previousIds.has(wallet));
+          const claimed = new Set(
+            (body.addedWalletNullifiers ?? []).map((entry) => entry.walletNullifier),
+          );
+          if (
+            derivedAdded.length !== claimed.size ||
+            derivedAdded.some((wallet) => !claimed.has(wallet))
+          ) {
+            throw new RegistrationConflict(keptIds[0]!);
+          }
+          await store.migrateWallets(previousIdentity, body.identityNullifier, kept);
         }
-        const derivedAdded = keptIds.filter((wallet) => !previousIds.has(wallet));
-        const claimed = new Set(
-          (body.addedWalletNullifiers ?? []).map((entry) => entry.walletNullifier),
-        );
-        if (
-          derivedAdded.length !== claimed.size ||
-          derivedAdded.some((wallet) => !claimed.has(wallet))
-        ) {
-          throw new RegistrationConflict(keptIds[0]!);
-        }
-        await store.migrateWallets(previousIdentity, body.identityNullifier, kept);
         const record = recordFromBody(body);
         await store.upsertRegistration(record);
         return record;

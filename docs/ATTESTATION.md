@@ -68,10 +68,12 @@ token cannot be replayed for a different key or a doctored result.
 7. `eat_nonce` contains the expected binding nonce.
 8. `body.policyVersion` matches, `body.nonce` matches the request nonce.
 9. The result is not expired and the tier is in range.
-10. Addition results carry `previousIdentityNullifier`,
-    `addedWalletNullifiers`, and `nextEscrowBlob` as a complete, consistent
-    triple (or carry none of them); the backend then checks the transition
-    against its stored bindings.
+10. Additions carry `previousIdentityNullifier`, `addedWalletNullifiers`, and
+    `nextEscrowBlob` as a complete triple; removals carry the same previous
+    identity and next blob with `removedWalletNullifiers` instead. A transition
+    never mixes both, always changes the identity, and never overlaps kept and
+    changed wallets. The backend then checks the transition against its stored
+    bindings.
 
 Any failure throws `VerificationError`; callers fail closed.
 

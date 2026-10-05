@@ -81,17 +81,19 @@ export class CoinGeckoPricing implements PricingProvider {
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.at < this.ttlMs) return cached.quote;
 
-    const quote =
+    const raw =
       (await this.fetchQuote(balance)) ??
       (this.fallback ? await this.fallback.quote(balance) : null);
+    // The par cap applies to whichever provider produced the quote, so a DEX
+    // fallback cannot bypass it. Native assets are never par-capped.
+    const quote = raw && balance.asset !== "native" ? capAtPar(raw) : raw;
     if (quote) this.cache.set(key, { at: Date.now(), quote });
     return quote;
   }
 
   private async fetchQuote(balance: RawBalance): Promise<PriceQuote | null> {
     if (balance.asset === "native") return this.nativeQuote(balance);
-    const quote = await this.tokenQuote(balance).catch(() => null);
-    return quote ? capAtPar(quote) : null;
+    return this.tokenQuote(balance).catch(() => null);
   }
 
   private async nativeQuote(balance: RawBalance): Promise<PriceQuote | null> {
@@ -140,6 +142,135 @@ export class CoinGeckoPricing implements PricingProvider {
     if (usd === undefined) return null;
     const priceMicroUsd = usdToMicro(usd);
     return priceMicroUsd > 0n ? { priceMicroUsd, derived: false } : null;
+  }
+}
+
+const GECKOTERMINAL_BASE = "https://api.geckoterminal.com/api/v2";
+const DEXSCREENER_BASE = "https://api.dexscreener.com/latest/dex";
+
+interface GeckoTerminalResponse {
+  data?: { attributes?: { token_prices?: Record<string, string> } };
+}
+
+interface DexScreenerResponse {
+  pairs?: Array<{
+    chainId?: string;
+    priceUsd?: string;
+    liquidity?: { usd?: number };
+  }>;
+}
+
+function parseUsd(value: string | number | undefined): bigint {
+  if (value === undefined) return 0n;
+  const usd = typeof value === "number" ? value : Number(value);
+  return usdToMicro(usd);
+}
+
+/**
+ * GeckoTerminal token prices by network and contract address. Covers assets
+ * with live DEX pools that CoinGecko has not indexed; anything without a pool
+ * returns null and the next fallback is tried.
+ */
+export class GeckoTerminalPricing implements PricingProvider {
+  private readonly cache = new Map<string, { at: number; quote: PriceQuote }>();
+  private readonly ttlMs: number;
+  private readonly headers: Record<string, string>;
+  private readonly fallback: PricingProvider | null;
+  private readonly chains: readonly ChainConfig[];
+
+  constructor(options: {
+    apiKey?: string;
+    ttlMs?: number;
+    fallback?: PricingProvider;
+    devChains?: boolean;
+  } = {}) {
+    this.ttlMs = options.ttlMs ?? 120_000;
+    this.headers = options.apiKey ? { "x-api-key": options.apiKey } : {};
+    this.fallback = options.fallback ?? null;
+    this.chains = activeChains(options.devChains ?? false);
+  }
+
+  async quote(balance: RawBalance): Promise<PriceQuote | null> {
+    const key = `gt:${balance.family}:${balance.chainId}:${balance.asset.toLowerCase()}`;
+    const cached = this.cache.get(key);
+    if (cached && Date.now() - cached.at < this.ttlMs) return cached.quote;
+
+    const quote =
+      (balance.asset === "native" ? null : await this.fetchQuote(balance)) ??
+      (this.fallback ? await this.fallback.quote(balance) : null);
+    if (quote) this.cache.set(key, { at: Date.now(), quote });
+    return quote;
+  }
+
+  private async fetchQuote(balance: RawBalance): Promise<PriceQuote | null> {
+    const chain = this.chains.find(
+      (c) => c.chainId === balance.chainId && c.family === balance.family,
+    );
+    const network = chain?.geckoterminalNetwork;
+    if (!network) return null;
+    const address =
+      balance.family === "evm" ? balance.asset.toLowerCase() : balance.asset;
+    const data = await getJson<GeckoTerminalResponse>(
+      `${GECKOTERMINAL_BASE}/simple/networks/${encodeURIComponent(
+        network,
+      )}/token_price/${encodeURIComponent(address)}`,
+      this.headers,
+    ).catch(() => null);
+    const prices = data?.data?.attributes?.token_prices;
+    if (!prices) return null;
+    const entry =
+      prices[address] ??
+      prices[address.toLowerCase()] ??
+      Object.entries(prices).find(([k]) => k.toLowerCase() === address.toLowerCase())?.[1];
+    const priceMicroUsd = parseUsd(entry);
+    return priceMicroUsd > 0n ? { priceMicroUsd, derived: false } : null;
+  }
+}
+
+/**
+ * DexScreener token prices across pairs. When a token trades on several
+ * chains, the pair on the balance's chain with the deepest liquidity wins.
+ */
+export class DexScreenerPricing implements PricingProvider {
+  private readonly cache = new Map<string, { at: number; quote: PriceQuote }>();
+  private readonly ttlMs: number;
+  private readonly chains: readonly ChainConfig[];
+
+  constructor(options: { ttlMs?: number; devChains?: boolean } = {}) {
+    this.ttlMs = options.ttlMs ?? 120_000;
+    this.chains = activeChains(options.devChains ?? false);
+  }
+
+  async quote(balance: RawBalance): Promise<PriceQuote | null> {
+    if (balance.asset === "native") return null;
+    const key = `ds:${balance.family}:${balance.chainId}:${balance.asset.toLowerCase()}`;
+    const cached = this.cache.get(key);
+    if (cached && Date.now() - cached.at < this.ttlMs) return cached.quote;
+
+    const quote = await this.fetchQuote(balance);
+    if (quote) this.cache.set(key, { at: Date.now(), quote });
+    return quote;
+  }
+
+  private async fetchQuote(balance: RawBalance): Promise<PriceQuote | null> {
+    const chain = this.chains.find(
+      (c) => c.chainId === balance.chainId && c.family === balance.family,
+    );
+    const chainId = chain?.dexscreenerChainId;
+    if (!chainId) return null;
+    const address =
+      balance.family === "evm" ? balance.asset.toLowerCase() : balance.asset;
+    const data = await getJson<DexScreenerResponse>(
+      `${DEXSCREENER_BASE}/tokens/${encodeURIComponent(address)}`,
+    ).catch(() => null);
+    const pairs = (data?.pairs ?? []).filter(
+      (pair) => pair.chainId === chainId && parseUsd(pair.priceUsd) > 0n,
+    );
+    if (pairs.length === 0) return null;
+    const best = pairs.reduce((top, pair) =>
+      (pair.liquidity?.usd ?? 0) > (top.liquidity?.usd ?? 0) ? pair : top,
+    );
+    return { priceMicroUsd: parseUsd(best.priceUsd), derived: false };
   }
 }
 

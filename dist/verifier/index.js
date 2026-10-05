@@ -58,7 +58,7 @@ export class AttestationVerifier {
                 throw new VerificationError("bad_transition", "a wallet cannot be kept and removed");
             }
         }
-        this.checkAddition(body);
+        this.checkTransition(body);
         // 2. The attestation token must be genuine and bound to this key + result.
         const payload = await this.verifyToken(signed.attestationToken, signed.provider);
         const expectedNonce = this.expectedResultNonce(signed.enclavePublicKey, canonicalBody);
@@ -97,37 +97,57 @@ export class AttestationVerifier {
         }
     }
     /**
-     * Addition results carry exactly three extra fields. They are accepted only
-     * together, must reference an identity that actually changed, and the added
-     * entries must be part of the resulting wallet set. The backend still checks
-     * the transition against its stored bindings; this is the shape gate.
+     * Additions and removals each carry a triple: previous identity, the changed
+     * wallet nullifiers, and the next escrow blob. They are accepted only as a
+     * complete triple, an identity change is mandatory, and added/removed sets
+     * must not overlap the resulting set. The backend still checks the
+     * transition against its stored bindings; this is the shape gate.
      */
-    checkAddition(body) {
-        const present = [
-            body.previousIdentityNullifier,
-            body.addedWalletNullifiers,
-            body.nextEscrowBlob,
-        ].filter((value) => value !== undefined).length;
-        if (present === 0)
-            return;
-        if (present !== 3) {
-            throw new VerificationError("bad_transition", "addition fields must be present together");
-        }
+    checkTransition(body) {
+        const added = body.addedWalletNullifiers;
+        const removed = body.removedWalletNullifiers ?? [];
         const previous = body.previousIdentityNullifier;
+        const hasAdded = added !== undefined;
+        const hasRemoved = Array.isArray(removed) && removed.length > 0;
+        const hasPrevious = previous !== undefined;
+        const hasBlob = body.nextEscrowBlob !== undefined;
+        if (!hasAdded && !hasRemoved) {
+            if (hasPrevious || hasBlob) {
+                throw new VerificationError("bad_transition", "transition fields are present without a transition");
+            }
+            return;
+        }
+        if (hasAdded && hasRemoved) {
+            throw new VerificationError("bad_transition", "a transition cannot add and remove wallets at once");
+        }
+        if (!hasPrevious || !hasBlob) {
+            throw new VerificationError("bad_transition", "transition fields must be present together");
+        }
         if (typeof previous !== "string" || !/^[0-9a-f]{64}$/.test(previous)) {
             throw new VerificationError("bad_transition", "previous identity is malformed");
         }
         if (previous === body.identityNullifier) {
-            throw new VerificationError("bad_transition", "an addition must change the identity");
+            throw new VerificationError("bad_transition", "a transition must change the identity");
         }
-        const added = body.addedWalletNullifiers;
-        if (!Array.isArray(added) || added.length === 0) {
-            throw new VerificationError("bad_transition", "an addition must add at least one wallet");
+        if (body.walletNullifiers.length === 0) {
+            throw new VerificationError("bad_transition", "at least one wallet must stay");
         }
         const kept = new Set(body.walletNullifiers.map((entry) => entry.walletNullifier));
-        for (const entry of added) {
-            if (!kept.has(entry.walletNullifier)) {
-                throw new VerificationError("bad_transition", "an added wallet is missing from the resulting set");
+        if (hasAdded) {
+            if (!Array.isArray(added) || added.length === 0) {
+                throw new VerificationError("bad_transition", "an addition must add at least one wallet");
+            }
+            for (const entry of added) {
+                if (!kept.has(entry.walletNullifier)) {
+                    throw new VerificationError("bad_transition", "an added wallet is missing from the resulting set");
+                }
+            }
+        }
+        else {
+            for (const entry of removed) {
+                if (kept.has(entry.walletNullifier)) {
+                    throw new VerificationError("bad_transition", "a removed wallet cannot remain in the resulting set");
+                }
             }
         }
         const blob = body.nextEscrowBlob;

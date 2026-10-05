@@ -6,7 +6,7 @@ import { EnclaveKeyManager } from "./keys.js";
 import { ConcurrencyGate, FixedWindowRateLimiter, SeenNonces } from "./limits.js";
 import { keyedNullifierScheme, LEGACY_NULLIFIER_SCHEME, } from "../shared/nullifiers.js";
 import { hexToBytes } from "../shared/crypto.js";
-import { CoinGeckoPricing } from "./pricing.js";
+import { CoinGeckoPricing, DexScreenerPricing, GeckoTerminalPricing, } from "./pricing.js";
 import { recheckPortfolio, registerPortfolio, RegistrationError } from "./registration.js";
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_CONCURRENT_REGISTRATIONS = 4;
@@ -20,11 +20,22 @@ export function createEnclaveServer(options = {}) {
         (useMock
             ? new MockAttestationProvider(env)
             : new ConfidentialSpaceAttestationProvider(env));
+    const devChains = env.SIXFIGS_DEV_CHAINS === "1";
+    const priceTtl = env.SIXFIGS_PRICE_TTL_MS ? { ttlMs: Number(env.SIXFIGS_PRICE_TTL_MS) } : {};
     const pricing = options.pricing ??
         new CoinGeckoPricing({
             ...(env.COINGECKO_API_KEY ? { apiKey: env.COINGECKO_API_KEY } : {}),
-            ...(env.SIXFIGS_PRICE_TTL_MS ? { ttlMs: Number(env.SIXFIGS_PRICE_TTL_MS) } : {}),
-            ...(env.SIXFIGS_DEV_CHAINS === "1" ? { devChains: true } : {}),
+            ...priceTtl,
+            ...(devChains ? { devChains: true } : {}),
+            fallback: new GeckoTerminalPricing({
+                ...(env.GECKOTERMINAL_API_KEY ? { apiKey: env.GECKOTERMINAL_API_KEY } : {}),
+                ...priceTtl,
+                ...(devChains ? { devChains: true } : {}),
+                fallback: new DexScreenerPricing({
+                    ...priceTtl,
+                    ...(devChains ? { devChains: true } : {}),
+                }),
+            }),
         });
     const nullifier = selectNullifierScheme(env);
     const keyManager = new EnclaveKeyManager(attestation, nullifier.name, env, options.escrowKeyProvider);

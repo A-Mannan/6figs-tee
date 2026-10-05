@@ -34,6 +34,20 @@ export interface PreparedAddition {
     /** Addition consent string per added wallet, keyed `family:lowercaseAddress`. */
     addMessages: Record<string, string>;
 }
+/** Prepared threshold removal: every kept wallet signs one shared challenge. */
+export interface PreparedRemoval {
+    nonce: string;
+    timestamp: number;
+    /** The stored account identity being pruned (from the backend). */
+    accountIdentityNullifier: string;
+    /** The stored set, ciphertext to the escrow key; forwarded opaquely. */
+    escrowBlob: SignedEnvelope;
+    kept: WalletDescriptor[];
+    remove: WalletDescriptor[];
+    /** The exact string every kept wallet must sign. */
+    message: string;
+    disclosure: Disclosure;
+}
 export interface RegistrationClientOptions {
     enclaveUrl: string;
     policy?: ClientAttestationPolicy;
@@ -96,6 +110,25 @@ export declare class RegistrationClient {
     /** Phase 2 for an addition: submit only the added wallets' signatures. */
     submitAddition(input: {
         prepared: PreparedAddition;
+        signatures: Record<string, string>;
+    }): Promise<SignedRegistration>;
+    /**
+     * Phase 1 for a threshold removal: every kept wallet will sign the same
+     * compact consent naming the removed wallets. The removed wallets are not
+     * connected and sign nothing.
+     */
+    prepareRemoval(input: {
+        kept: WalletDescriptor[];
+        remove: WalletDescriptor[];
+        escrowBlob: SignedEnvelope;
+        accountIdentityNullifier: string;
+        nonce?: string;
+        disclosure?: Disclosure;
+        timestamp?: number;
+    }): PreparedRemoval;
+    /** Phase 2 for a threshold removal: submit the kept wallets' signatures. */
+    submitRemoval(input: {
+        prepared: PreparedRemoval;
         signatures: Record<string, string>;
     }): Promise<SignedRegistration>;
 }

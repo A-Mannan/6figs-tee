@@ -8,18 +8,24 @@
 
 ## Blockers
 
-Dev-resolvable now; production gates:
-
 - [x] B1 Branching — tee work on `main`; both app repos pulled and left on
   `tee-integration` (owner direction 2026-10-03).
-- [ ] G1 KMS provisioning — production needs a key ring, a wrapped escrow key,
+
+### Deferred (post-testing, not blocking)
+
+Owner direction 2026-10-05: the environment is testing-only, so production
+provisioning is parked here and kept visible. `[~]` means deliberately not
+started for this phase.
+
+- [~] G1 KMS provisioning — production needs a key ring, a wrapped escrow key,
   a workload identity pool/provider, and the IAM binding to the attested
-  principal set. Code ships with env fallback + tests using a fake KMS; real
-  GCP credentials are required to smoke the live path.
-- [ ] G2 SMTP credentials — production boot refuses without SMTP (or the
-  explicit console override).
-- [ ] G3 Production enclave hosting/fleet (separate from the dev VM),
-  transferred from `integration-product`; includes the dev VM rebuild at 5.3.
+  principal set. Code ships with env fallback + tests using a fake KMS.
+- [~] G2 SMTP/Resend credentials — production boot refuses without SMTP or
+  `RESEND_API_KEY` (or the explicit console override).
+- [~] G3 Production enclave hosting/fleet (separate from the dev VM),
+  transferred from `integration-product`.
+- [~] 5.3 Rebuild the dev enclave VM for the current policy version and re-pin
+  the digest; local mock-enclave testing is unaffected.
 
 ## 0. KMS-bound escrow key (tee)
 
@@ -106,8 +112,9 @@ Dev-resolvable now; production gates:
 - [x] 5.2 Backend: `yarn typecheck`, `build`, `lint`, `prisma validate`
   green; migration applied on a fresh local Postgres + live route smoke
   (recovery + add + removal rejection)
-- [ ] 5.3 Record dev enclave rebuild needs (new digest if the dev VM is
-  rebuilt) and update `docs/DEV-ENCLAVE.md` (doc note added; VM not rebuilt)
+- [~] 5.3 Record dev enclave rebuild needs (new digest if the dev VM is
+  rebuilt) and update `docs/DEV-ENCLAVE.md` (doc note added; VM not rebuilt —
+  deferred with the other post-testing items above)
 - [x] 5.4 Update `docs/ATTESTATION.md` and `docs/SECURITY.md` for the new
   result fields, KMS trust statement, and add-only trade-off
 ## 6. Disclosure minimization (owner request 2026-10-03)

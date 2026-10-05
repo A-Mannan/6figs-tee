@@ -132,12 +132,11 @@ node --experimental-strip-types scripts/smoke-enclave.ts \
 Live instance (2026-10-01): `sixfigs-enclave-dev` in `us-east1-b`,
 `http://34.73.89.203:8080`, digest
 `sha256:2b5f840b2a009940f8a2ba7fdc0654dc8f2620a2542b851bec74cec5073fe232`.
-This VM still runs the pre-`integration-followups` image: it advertises
-`escrowKeyProvider: env` and policy `6figs-tee-2026-10-a`, so the new
-add-wallet and trimmed-disclosure flows (policy `6figs-tee-2026-10-c`) will
+This VM still runs an early image (policy `6figs-tee-2026-10-a`), so the
+newer add/remove and pricing flows (current policy `6figs-tee-2026-10-d`) will
 fail against it. Rebuild and recreate the VM from the current `main` before
-dev-testing additions; then point the apps' expected policy version and digest
-at the new build.
+dev-testing; then point the apps' expected policy version and digest at the new
+build. Local mock-enclave testing does not need the VM.
 Rebuilding the image changes the digest; recreating the VM may change the IP —
 re-pin both in app configs afterwards.
 

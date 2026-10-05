@@ -16,7 +16,12 @@ import {
   type NullifierScheme,
 } from "../shared/nullifiers.ts";
 import { hexToBytes } from "../shared/crypto.ts";
-import { CoinGeckoPricing, type PricingProvider } from "./pricing.ts";
+import {
+  CoinGeckoPricing,
+  DexScreenerPricing,
+  GeckoTerminalPricing,
+  type PricingProvider,
+} from "./pricing.ts";
 import { recheckPortfolio, registerPortfolio, RegistrationError } from "./registration.ts";
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -43,12 +48,23 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
     (useMock
       ? new MockAttestationProvider(env)
       : new ConfidentialSpaceAttestationProvider(env));
+  const devChains = env.SIXFIGS_DEV_CHAINS === "1";
+  const priceTtl = env.SIXFIGS_PRICE_TTL_MS ? { ttlMs: Number(env.SIXFIGS_PRICE_TTL_MS) } : {};
   const pricing =
     options.pricing ??
     new CoinGeckoPricing({
       ...(env.COINGECKO_API_KEY ? { apiKey: env.COINGECKO_API_KEY } : {}),
-      ...(env.SIXFIGS_PRICE_TTL_MS ? { ttlMs: Number(env.SIXFIGS_PRICE_TTL_MS) } : {}),
-      ...(env.SIXFIGS_DEV_CHAINS === "1" ? { devChains: true } : {}),
+      ...priceTtl,
+      ...(devChains ? { devChains: true } : {}),
+      fallback: new GeckoTerminalPricing({
+        ...(env.GECKOTERMINAL_API_KEY ? { apiKey: env.GECKOTERMINAL_API_KEY } : {}),
+        ...priceTtl,
+        ...(devChains ? { devChains: true } : {}),
+        fallback: new DexScreenerPricing({
+          ...priceTtl,
+          ...(devChains ? { devChains: true } : {}),
+        }),
+      }),
     });
 
   const nullifier = selectNullifierScheme(env);

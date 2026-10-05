@@ -1,4 +1,4 @@
-import { ownershipChallenge, walletAdditionChallenge, walletRemovalChallenge, } from "../shared/constants.js";
+import { ownershipChallenge, walletAdditionChallenge, walletRemovalChallenge, walletThresholdRemovalChallenge, } from "../shared/constants.js";
 import { base64urlToBytes, bytesToBase64url, randomBytes } from "../shared/crypto.js";
 import { encryptEnvelope } from "../shared/envelope.js";
 import { walletEntriesFromAddresses, walletSetNullifier } from "../shared/nullifiers.js";
@@ -244,6 +244,108 @@ export class RegistrationClient {
             const actual = addedEntries.map((entry) => entry.walletNullifier).sort();
             if (JSON.stringify(expected) !== JSON.stringify(actual)) {
                 throw new RegistrationClientError("addition_mismatch", "enclave result added a different wallet set");
+            }
+        }
+        return result;
+    }
+    /**
+     * Phase 1 for a threshold removal: every kept wallet will sign the same
+     * compact consent naming the removed wallets. The removed wallets are not
+     * connected and sign nothing.
+     */
+    prepareRemoval(input) {
+        if (input.remove.length === 0)
+            throw new Error("at least one wallet must be removed");
+        if (input.kept.length === 0)
+            throw new Error("at least one wallet must stay enrolled");
+        if (typeof input.accountIdentityNullifier !== "string" || input.accountIdentityNullifier.length === 0) {
+            throw new Error("accountIdentityNullifier is required");
+        }
+        const nonce = input.nonce ?? bytesToBase64url(randomBytes(24));
+        const timestamp = input.timestamp ?? Date.now();
+        const message = walletThresholdRemovalChallenge({
+            accountIdentityNullifier: input.accountIdentityNullifier,
+            removals: input.remove,
+            timestamp,
+            nonce,
+        });
+        return {
+            nonce,
+            timestamp,
+            accountIdentityNullifier: input.accountIdentityNullifier,
+            escrowBlob: input.escrowBlob,
+            kept: input.kept,
+            remove: input.remove,
+            message,
+            disclosure: input.disclosure ?? "hidden",
+        };
+    }
+    /** Phase 2 for a threshold removal: submit the kept wallets' signatures. */
+    async submitRemoval(input) {
+        const hello = await this.hello();
+        const { prepared, signatures } = input;
+        const wallets = prepared.kept.map((wallet) => {
+            const signature = signatures[descriptorKey(wallet)];
+            if (!signature)
+                throw new Error(`missing signature for kept wallet ${wallet.address}`);
+            return {
+                family: wallet.family,
+                chainId: wallet.chainId,
+                address: wallet.address,
+                signature,
+                ...(wallet.label ? { label: wallet.label } : {}),
+            };
+        });
+        const removals = prepared.remove.map((wallet) => ({
+            family: wallet.family,
+            chainId: wallet.chainId,
+            address: wallet.address,
+            signature: "",
+        }));
+        const request = {
+            nonce: prepared.nonce,
+            timestamp: prepared.timestamp,
+            mode: "remove",
+            escrowBlob: prepared.escrowBlob,
+            baseIdentityNullifier: prepared.accountIdentityNullifier,
+            wallets,
+            removals,
+            disclosure: prepared.disclosure,
+        };
+        const envelope = await encryptEnvelope(base64urlToBytes(hello.encryptionPublicKey), { request });
+        const response = await this.fetchImpl(`${this.options.enclaveUrl}/registration`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(envelope),
+        });
+        if (!response.ok) {
+            const error = (await response.json().catch(() => ({})));
+            throw new RegistrationClientError(error.error ?? "enclave_error", error.message ?? `removal failed (${response.status})`);
+        }
+        const result = (await response.json());
+        await verifyRegistrationAttestation(result, this.options.policy ?? {});
+        if (result.body.nullifierScheme !== hello.nullifierScheme) {
+            throw new RegistrationClientError("scheme_mismatch", "enclave result uses an unexpected nullifier scheme");
+        }
+        if (result.body.previousIdentityNullifier !== prepared.accountIdentityNullifier) {
+            throw new RegistrationClientError("base_identity_mismatch", "enclave pruned a different account than requested");
+        }
+        if (!result.body.nextEscrowBlob || result.body.nextEscrowBlob.v !== 1) {
+            throw new RegistrationClientError("escrow_missing", "enclave result carries no escrow blob for the kept set");
+        }
+        const removedEntries = result.body.removedWalletNullifiers ?? [];
+        if (removedEntries.length !== prepared.remove.length) {
+            throw new RegistrationClientError("removal_mismatch", "enclave result removed a different wallet count");
+        }
+        // Only the legacy scheme is client-computable; under a keyed scheme the
+        // attested enclave and the backend verifier own these checks.
+        if (hello.nullifierScheme === "legacy-v1") {
+            const expected = walletEntriesFromAddresses(prepared.remove)
+                .map((entry) => entry.walletNullifier)
+                .sort();
+            const actual = removedEntries.map((entry) => entry.walletNullifier).sort();
+            if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+                throw new RegistrationClientError("removal_mismatch", "enclave result removed a different wallet set");
             }
         }
         return result;

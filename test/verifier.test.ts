@@ -347,12 +347,27 @@ test("registration service refuses to drop an enrolled wallet", async () => {
   );
 });
 
-test("verifier accepts a well-formed removal without any claimed previous identity", async () => {
+test("verifier rejects a removal without a claimed previous identity", async () => {
   const { signed } = await makeSigned({
     removedWalletNullifiers: [walletEntry("wallet-b")],
   });
+  await assert.rejects(
+    () => verifier().verifyRegistration(signed),
+    (e: unknown) => e instanceof VerificationError && e.code === "bad_transition",
+  );
+});
+
+test("verifier accepts a well-formed threshold removal", async () => {
+  const entries = [walletEntry("wallet-a"), walletEntry("wallet-b")];
+  const { signed } = await makeSigned({
+    walletNullifiers: [walletEntry("wallet-a")],
+    removedWalletNullifiers: [walletEntry("wallet-b")],
+    previousIdentityNullifier: walletSetNullifier(entries),
+    nextEscrowBlob: { v: 1, epk: "ephemeral", iv: "nonce", ct: "ciphertext" },
+  });
   const body = await verifier().verifyRegistration(signed);
   assert.equal(body.removedWalletNullifiers?.length, 1);
+  assert.equal(body.identityNullifier, walletSetNullifier([walletEntry("wallet-a")]));
 });
 
 test("verifier rejects a wallet that is both kept and removed", async () => {
@@ -365,7 +380,7 @@ test("verifier rejects a wallet that is both kept and removed", async () => {
   );
 });
 
-test("registration service rejects removal results", async () => {
+test("registration service applies a threshold removal", async () => {
   const store = new InMemoryNullifierStore();
   const service = new RegistrationService({ verifier: verifier(), store });
 
@@ -377,12 +392,19 @@ test("registration service rejects removal results", async () => {
   const removal = await makeSigned({
     walletNullifiers: [walletEntry("wallet-a")],
     removedWalletNullifiers: [walletEntry("wallet-b")],
+    previousIdentityNullifier: firstRecord.identityNullifier,
+    nextEscrowBlob: { v: 1, epk: "ephemeral", iv: "nonce", ct: "ciphertext" },
   });
-  await assert.rejects(
-    () => service.submit(removal.signed),
-    (e: unknown) => e instanceof RegistrationConflict,
+  const record = await service.submit(removal.signed);
+
+  assert.equal(record.identityNullifier, walletSetNullifier([walletEntry("wallet-a")]));
+  assert.equal((await store.listWallets(record.identityNullifier)).length, 1);
+  assert.equal(
+    (await store.getWalletOwners([walletEntry("wallet-b").walletNullifier])).size,
+    0,
+    "the removed wallet is freed",
   );
-  assert.equal((await store.listWallets(firstRecord.identityNullifier)).length, 2);
+  assert.equal(await store.getIdentity(firstRecord.identityNullifier), null);
 });
 
 test("registration service applies an addition bound to the previous identity", async () => {
@@ -460,11 +482,35 @@ test("registration service rejects a removal that omits an enrolled wallet", asy
   const first = await makeSigned({
     walletNullifiers: [walletEntry("wallet-a"), walletEntry("wallet-b"), walletEntry("wallet-c")],
   });
-  await service.submit(first.signed);
+  const firstRecord = await service.submit(first.signed);
 
   const removal = await makeSigned({
     walletNullifiers: [walletEntry("wallet-a")],
     removedWalletNullifiers: [walletEntry("wallet-b")],
+    previousIdentityNullifier: firstRecord.identityNullifier,
+    nextEscrowBlob: { v: 1, epk: "ephemeral", iv: "nonce", ct: "ciphertext" },
+  });
+  await assert.rejects(
+    () => service.submit(removal.signed),
+    (e: unknown) => e instanceof RegistrationConflict,
+  );
+  assert.equal((await store.listWallets(firstRecord.identityNullifier)).length, 3);
+});
+
+test("registration service rejects removing a wallet that was never enrolled", async () => {
+  const store = new InMemoryNullifierStore();
+  const service = new RegistrationService({ verifier: verifier(), store });
+
+  const first = await makeSigned({
+    walletNullifiers: [walletEntry("wallet-a"), walletEntry("wallet-b"), walletEntry("wallet-c")],
+  });
+  const firstRecord = await service.submit(first.signed);
+
+  const removal = await makeSigned({
+    walletNullifiers: [walletEntry("wallet-a"), walletEntry("wallet-b")],
+    removedWalletNullifiers: [walletEntry("wallet-d")],
+    previousIdentityNullifier: firstRecord.identityNullifier,
+    nextEscrowBlob: { v: 1, epk: "ephemeral", iv: "nonce", ct: "ciphertext" },
   });
   await assert.rejects(
     () => service.submit(removal.signed),
@@ -472,20 +518,17 @@ test("registration service rejects a removal that omits an enrolled wallet", asy
   );
 });
 
-test("registration service rejects removing a wallet that was never enrolled", async () => {
-  const store = new InMemoryNullifierStore();
-  const service = new RegistrationService({ verifier: verifier(), store });
-
-  const first = await makeSigned({ walletNullifiers: [walletEntry("wallet-a")] });
-  await service.submit(first.signed);
-
-  const removal = await makeSigned({
-    walletNullifiers: [walletEntry("wallet-a")],
-    removedWalletNullifiers: [walletEntry("wallet-b")],
+test("verifier rejects removing a wallet that stays enrolled", async () => {
+  const entries = [walletEntry("wallet-a"), walletEntry("wallet-b")];
+  const { signed } = await makeSigned({
+    walletNullifiers: entries,
+    removedWalletNullifiers: [walletEntry("wallet-a")],
+    previousIdentityNullifier: walletSetNullifier(entries),
+    nextEscrowBlob: { v: 1, epk: "ephemeral", iv: "nonce", ct: "ciphertext" },
   });
   await assert.rejects(
-    () => service.submit(removal.signed),
-    (e: unknown) => e instanceof RegistrationConflict,
+    () => verifier().verifyRegistration(signed),
+    (e: unknown) => e instanceof VerificationError && e.code === "bad_transition",
   );
 });
 

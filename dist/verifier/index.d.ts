@@ -52,12 +52,13 @@ export declare class AttestationVerifier {
     /** Verify the /hello key attestation binds the advertised signing key. */
     verifyHello(hello: EnclaveHello): Promise<void>;
     /**
-     * Addition results carry exactly three extra fields. They are accepted only
-     * together, must reference an identity that actually changed, and the added
-     * entries must be part of the resulting wallet set. The backend still checks
-     * the transition against its stored bindings; this is the shape gate.
+     * Additions and removals each carry a triple: previous identity, the changed
+     * wallet nullifiers, and the next escrow blob. They are accepted only as a
+     * complete triple, an identity change is mandatory, and added/removed sets
+     * must not overlap the resulting set. The backend still checks the
+     * transition against its stored bindings; this is the shape gate.
      */
-    private checkAddition;
+    private checkTransition;
     private expectedResultNonce;
     private verifyToken;
     private requireNonce;

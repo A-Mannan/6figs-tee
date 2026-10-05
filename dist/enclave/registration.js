@@ -1,4 +1,4 @@
-import { activeTiers, DOMAIN, MAX_ASSETS_PER_REQUEST, POLICY_VERSION, walletAdditionChallenge, walletRemovalChallenge, } from "../shared/constants.js";
+import { activeTiers, DOMAIN, MAX_ASSETS_PER_REQUEST, POLICY_VERSION, walletAdditionChallenge, walletRemovalChallenge, walletThresholdRemovalChallenge, } from "../shared/constants.js";
 import { decryptEnvelope, encryptEnvelope } from "../shared/envelope.js";
 import { canonicalJson, sha256Bytes, sha256Hex, utf8, } from "../shared/crypto.js";
 import { LEGACY_NULLIFIER_SCHEME, walletEntriesFromAddresses, walletSetNullifier, } from "../shared/nullifiers.js";
@@ -25,6 +25,9 @@ export async function registerPortfolio(request, deps) {
     validateRequestShape(request);
     if (request.mode === "add") {
         return registerAddition(request, deps);
+    }
+    if (request.mode === "remove") {
+        return registerRemoval(request, deps);
     }
     const now = Date.now();
     if (Math.abs(now - request.timestamp) > REQUEST_MAX_AGE_MS) {
@@ -230,6 +233,135 @@ async function registerAddition(request, deps) {
     };
     return signBody(body, deps);
 }
+/**
+ * Prune wallets from the account carried by the stored escrow blob. Every
+ * kept wallet signs one challenge naming the removed wallets; the removed
+ * (possibly lost) wallets sign nothing. This is the threshold recovery path:
+ * N-1 cooperating wallets can evict the Nth.
+ */
+async function registerRemoval(request, deps) {
+    const env = deps.env ?? process.env;
+    if (!deps.escrowPersistent) {
+        throw new RegistrationError("escrow_unavailable", "escrow key is not persistent; removals are disabled");
+    }
+    if (!request.escrowBlob || typeof request.baseIdentityNullifier !== "string") {
+        throw new RegistrationError("bad_request", "remove mode requires escrowBlob and baseIdentityNullifier");
+    }
+    const removals = request.removals ?? [];
+    if (removals.length === 0) {
+        throw new RegistrationError("bad_request", "remove mode requires at least one removal");
+    }
+    if (request.wallets.length === 0) {
+        throw new RegistrationError("bad_request", "at least one wallet must stay enrolled");
+    }
+    const now = Date.now();
+    if (Math.abs(now - request.timestamp) > REQUEST_MAX_AGE_MS) {
+        throw new RegistrationError("stale_request", "request timestamp is outside the freshness window");
+    }
+    const deadline = now + (Number(env.SIXFIGS_REGISTRATION_BUDGET_MS) || DEFAULT_REGISTRATION_BUDGET_MS);
+    const escrow = await decryptEnvelope(deps.keys.escrowPrivate, request.escrowBlob).catch(() => {
+        throw new RegistrationError("bad_escrow", "escrow blob could not be decrypted");
+    });
+    if (!escrow || escrow.v !== 1 || !Array.isArray(escrow.wallets) || escrow.wallets.length === 0) {
+        throw new RegistrationError("bad_escrow", "escrow payload is malformed");
+    }
+    const stored = withLabels(escrow.wallets);
+    const storedEntries = walletEntriesFromAddresses(stored, deps.nullifier);
+    const baseIdentity = walletSetNullifier(storedEntries);
+    if (baseIdentity !== request.baseIdentityNullifier) {
+        throw new RegistrationError("base_identity_mismatch", "escrow blob belongs to a different account than claimed");
+    }
+    // The stored objects are authoritative (labels, chain ids); the request only
+    // supplies the kept wallets' signatures and the removal list.
+    const storedByKey = new Map(stored.map((wallet) => [walletKey(wallet), wallet]));
+    const removalKeys = new Set();
+    for (const wallet of removals) {
+        const key = walletKey(wallet);
+        if (removalKeys.has(key)) {
+            throw new RegistrationError("duplicate_wallet", "the same wallet was removed twice");
+        }
+        if (!storedByKey.has(key)) {
+            throw new RegistrationError("unknown_wallet", "a removed wallet is not enrolled");
+        }
+        removalKeys.add(key);
+    }
+    const kept = stored.filter((wallet) => !removalKeys.has(walletKey(wallet)));
+    if (kept.length === 0) {
+        throw new RegistrationError("bad_request", "cannot remove every enrolled wallet");
+    }
+    if (request.wallets.length !== kept.length) {
+        throw new RegistrationError("kept_set_mismatch", "the kept wallet set does not match the stored set minus removals");
+    }
+    const keptKeys = new Set(kept.map(walletKey));
+    const requestKeys = new Set(request.wallets.map(walletKey));
+    if (requestKeys.size !== request.wallets.length ||
+        requestKeys.size !== keptKeys.size ||
+        [...keptKeys].some((key) => !requestKeys.has(key))) {
+        throw new RegistrationError("kept_set_mismatch", "the kept wallet set does not match the stored set minus removals");
+    }
+    // One challenge, signed once by every kept wallet.
+    const message = walletThresholdRemovalChallenge({
+        accountIdentityNullifier: baseIdentity,
+        removals,
+        timestamp: request.timestamp,
+        nonce: request.nonce,
+    });
+    for (const wallet of request.wallets) {
+        const result = verifyWalletSignature(wallet, message);
+        if (!result.ok) {
+            throw new RegistrationError("ownership_failed", `kept wallet signature check failed: ${result.reason}`);
+        }
+    }
+    const keptEntries = walletEntriesFromAddresses(kept, deps.nullifier);
+    const removedEntries = walletEntriesFromAddresses(removals.map((wallet) => storedByKey.get(walletKey(wallet))), deps.nullifier);
+    assertDistinctNullifiers(keptEntries);
+    assertDistinctNullifiers([...keptEntries, ...removedEntries]);
+    let rawBalances;
+    try {
+        rawBalances = await collectBalances(kept, env, deadline, MAX_ASSETS_PER_REQUEST);
+    }
+    catch (error) {
+        if (error instanceof RpcDisagreementError) {
+            throw new RegistrationError("rpc_disagreement", "redundant RPC providers disagree");
+        }
+        throw error;
+    }
+    const valued = await valueBalances(rawBalances, deps.pricing, deadline);
+    const tiers = tiersForEnv(env);
+    const tier = assignTier(valued.totalMicroUsd, tiers);
+    const nextEscrowBlob = await encryptEnvelope(deps.keys.escrowPublic, {
+        v: 1,
+        wallets: kept.map((wallet) => ({
+            family: wallet.family,
+            chainId: wallet.chainId,
+            address: wallet.address,
+            ...(wallet.label ? { label: wallet.label } : {}),
+        })),
+    });
+    const identity = walletSetNullifier(keptEntries);
+    const body = {
+        v: 1,
+        policyVersion: POLICY_VERSION,
+        tier: tier.id,
+        tierLabel: tier.label,
+        tierFloorMicroUsd: tier.minMicroUsd.toString(),
+        nextTierFloorMicroUsd: nextTierFloor(tier.id, tiers).toString(),
+        portfolioBand: portfolioBand(valued.totalMicroUsd, tiers),
+        topAssets: valued.topAssets,
+        disclosure: request.disclosure,
+        allocation: request.disclosure === "hidden" ? [] : valued.allocation,
+        walletNullifiers: keptEntries,
+        removedWalletNullifiers: removedEntries,
+        previousIdentityNullifier: baseIdentity,
+        nextEscrowBlob,
+        identityNullifier: identity,
+        createdAt: now,
+        expiresAt: now + RESULT_TTL_MS,
+        nonce: request.nonce,
+        nullifierScheme: deps.nullifier.name,
+    };
+    return signBody(body, deps);
+}
 function walletKey(wallet) {
     return `${wallet.family}:${wallet.family === "evm" ? wallet.address.toLowerCase() : wallet.address}`;
 }
@@ -378,7 +510,10 @@ function validateRecheckShape(payload) {
     }
 }
 function validateRequestShape(request) {
-    if (request.mode !== undefined && request.mode !== "establish" && request.mode !== "add") {
+    if (request.mode !== undefined &&
+        request.mode !== "establish" &&
+        request.mode !== "add" &&
+        request.mode !== "remove") {
         throw new RegistrationError("bad_request", `unsupported registration mode ${String(request.mode)}`);
     }
     if (typeof request.nonce !== "string" || request.nonce.length < 8) {

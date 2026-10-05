@@ -15,7 +15,7 @@ what would have to change to strengthen it further.
 | A malicious client | claim a tier it does not hold | Must produce valid EVM/Solana signatures over the exact challenge for every address, and all balances are fetched server-side inside the enclave from the address, not supplied by the client. |
 | A network middleman or TLS-terminating proxy | substitute the enclave's keys or results | Google attestation binds the image; the token nonce binds both enclave public keys; the result token binds the signing key and the exact result bytes. |
 | An attacker controlling RPC responses | inflate balances | Balance is read inside the enclave over TLS; a lying RPC is a risk — mitigations below. |
-| An attacker controlling prices | inflate value | CoinGecko is semi-trusted; dollar-range assets capped at $1.00; overflowing prices rejected; unpriced assets skipped. |
+| An attacker controlling prices | inflate value | Quotes come from CoinGecko, GeckoTerminal, then DexScreener; dollar-range assets capped at $1.00; overflowing prices rejected; unpriced assets skipped. No oracle feed is trusted. |
 | A dictionary attacker with the registry DB | map a wallet nullifier back to a known address | Open risk; see "confirmable wallet nullifier". Registry must stay private and write-only. |
 
 ## What the backend knows
@@ -65,24 +65,26 @@ review replaced it:
   asked to sign; the email session plus control of the added wallet is the
   authority. The enclave recomputes the previous identity from the stored
   escrow blob, so a forged base identity fails before any signing.
-- **Removal is not a product path.** The enclave can still build a removal
-  result for protocol compatibility, but the backend rejects any result that
-  carries removed wallets, so no membership can shrink. A wallet binding is
-  never deleted by the product flow.
-- **Losing a wallet is currently unrecoverable.** Recovering with N−1 of N
-  wallets needs a threshold policy (and its own risk model); it is deliberately
-  not implemented yet.
+- **Removal is a threshold transition.** Every kept wallet signs one compact
+  challenge naming the removed wallet(s); the removed (possibly lost) wallet
+  signs nothing. The enclave re-derives the stored set from the escrow blob,
+  requires kept = stored − removed with at least one wallet left, and signs the
+  new identity plus a fresh escrow blob. The backend accepts it only when the
+  stored set equals kept ∪ removed and the previous identity belongs to the
+  session user. N−1 cooperating wallets can therefore evict the Nth — the
+  explicit takeover trade for not bricking accounts when a wallet is lost.
+- **One wallet removal minimum.** Removing every wallet is rejected; an
+  account always keeps at least one.
 - **One wallet, one account.** Wallet nullifiers are unique-indexed; a set
   spanning two existing identities is rejected.
 
 Costs of this model, stated plainly: account security is the email account plus
 the enrolled wallets. Whoever holds the email session and control of one new
 wallet can extend the account (that is what makes additions one-signature);
-whoever holds the wallets can re-prove the full set. The trade was a deliberate
-product decision: requiring every old wallet to sign made additions impossible
-when one was lost and painful otherwise. Email verification, login throttling,
-and password rotation are the compensating controls; establishment still
-requires every wallet.
+whoever holds N−1 of the wallets can evict the Nth (that is what makes a lost
+wallet recoverable). Both are deliberate product decisions. Email verification,
+login throttling, and password rotation are the compensating controls;
+establishment still requires every wallet.
 
 ## Attack vectors reviewed, and their disposition
 
@@ -95,10 +97,10 @@ requires every wallet.
 | 5 | Replaying a wallet signature for another account or later request | Fixed | Challenge contains identity + timestamp + nonce; enclave enforces a ±120 s window. |
 | 6 | Client submits fake balances | Fixed | The client never sends balances; the enclave fetches them from the verified address. |
 | 7 | Replaying a signed result to the backend | Partially mitigated | Result TTL and idempotent persistence bound to the identity. The request-nonce check only binds when the caller passes the *original* client nonce; the NestJS example passes the body's own nonce, which cannot detect replay. |
-| 8 | Dictionary attack: compute the nullifier for public whale addresses and match stored nullifiers | **Partially mitigated** | Keyed nullifiers need the enclave key, so a leaked registry resists offline matching. Legacy rows remain confirmable; rotate to `keyed-v1` and retire them. Keep registration write-only and authenticated regardless. A blind OPRF is the planned upgrade (below). |
+| 8 | Dictionary attack: compute the nullifier for public whale addresses and match stored nullifiers | **Partially mitigated** | Keyed nullifiers need the enclave key, so a leaked registry resists offline matching. Legacy rows remain confirmable; rotate to `keyed-v1` and retire them. Keep registration write-only and authenticated regardless. A blind OPRF was considered and dropped; keyed HMAC is the accepted scheme. |
 | 9 | Losing the identity secret | **Eliminated** | Secret removed; wallet set is the account. |
 | 10 | Backend-issued IDs / JWTs as the root of identity | Rejected | They make the backend the credential authority and leave it holding a replayable bearer token. Nothing signed or hashed is delegated to the backend. |
-| 11 | Partial wallet compromise adds or removes wallets | Accepted for additions, rejected for removals | Additions need only the added wallet's signature plus the authenticated session, by product design; the backend still requires a strict superset transition and the enclave re-derives the base identity from the escrow blob. Removals are rejected outright. |
+| 11 | Partial wallet compromise adds or removes wallets | Accepted, bounded | Additions need only the added wallet's signature plus the authenticated session; removals need every kept wallet. N−1 cooperating wallets can evict the Nth — the deliberate trade that lets a lost wallet be removed. The backend enforces exact set equality against its stored bindings and the enclave re-derives the base identity from the escrow blob. |
 | 12 | Merging two accounts' wallets | Rejected | Set spanning two owners is a conflict; DB unique constraint is the backstop. |
 | 13 | A wallet is enrolled by two identities | Rejected | `wallet_nullifier` primary key + `bindWallets` conflict check. |
 | 14 | Unknown token-inflation (airdrop a fake token, hope it is valued) | Mitigated | No allowlist, but every asset needs a real price API quote, prices are overflow-checked, and dollar-range assets are capped. Residual risk needs liquidity/volume gates or a signed price feed. |
@@ -130,12 +132,15 @@ retired. The stronger fix is a blind OPRF: the enclave holds a KMS key and
 evaluates it obliviously, so the client cannot learn the input-output mapping.
 Until either lands, treat the registry as write-only from the outside.
 
-**3. Price-source manipulation.** CoinGecko could be wrong or manipulated.
-Defenses: no guessed values (unpriced assets are skipped), overflowing prices
-rejected, dollar-range assets capped at $1.00, and the total is bucketed so
-small price errors rarely cross a tier boundary. A signed price feed
-(Pyth/Chainlink via an on-chain verifier) is the stronger option and can be
-added without changing the client protocol.
+**3. Price-source manipulation.** A price source could be wrong or
+manipulated. Quotes fall back across CoinGecko, GeckoTerminal, and DexScreener
+by contract address; a source is stopped at the first valid quote. Defenses:
+no guessed values (unpriced assets are skipped), overflowing prices rejected,
+dollar-range assets capped at $1.00, and the total is bucketed so small price
+errors rarely cross a tier boundary. Oracle feeds are deliberately not used:
+they do not cover the long tail (for example graduated memecoins) this product
+holds. Cross-source agreement is a possible future hardening, not a testing
+requirement.
 
 **4. RPC lying about balances.** A compromised RPC could overstate a balance.
 Defenses: RPC URLs must be HTTPS; configure a secondary RPC per chain and the
@@ -198,19 +203,22 @@ The curated `TOKEN_SEEDS` list was deleted. Consequences and replacement rules:
   transition, shrink refusal, cross-account merge refusal, end-to-end
   registration and recovery.
 
-## Improvements planned
+## Improvements shipped and planned
 
-- KMS-backed OPRF nullifiers, closing the dictionary-attack gap.
 - KMS-bound escrow key SHIPPED: the enclave unwraps the escrow key through
   Cloud KMS using the Confidential Space token, workload identity federation,
   and optional service-account impersonation. Production refuses the
   `SIXFIGS_ESCROW_KEY` environment path unless
   `SIXFIGS_ALLOW_ENV_ESCROW_KEY=1`, so the "only the enclave can decrypt"
   claim is enforced by the KMS IAM policy rather than by the environment.
-- Signed price feed and dual-provider balance reads (or storage proofs).
-- Threshold transition policy so a user who loses one of N wallets can recover
-  with N−1 signatures, with a proportional takeover-risk model.
-- Self-hosted light client / Solana node to remove third-party RPCs.
+- Threshold wallet removal SHIPPED: every kept wallet signs, the removed (lost)
+  wallet signs nothing, and the backend enforces exact set equality.
+- Multi-source pricing SHIPPED: CoinGecko → GeckoTerminal → DexScreener by
+  contract address. Oracle feeds are deliberately not used (coverage).
+- Blind OPRF nullifiers DROPPED: the keyed-HMAC scheme stays; a registry leak
+  remains confirmable only with the enclave key, which is the accepted posture.
+- Planned: dual-provider balance reads, and a self-hosted light client /
+  Solana node to remove third-party RPCs.
 
 ## What a TEE does not give you
 

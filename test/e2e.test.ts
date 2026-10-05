@@ -253,6 +253,39 @@ test("end-to-end wallet addition through HTTP uses only the added signature", as
     nonce: "recheck-after-addition",
   });
   assert.equal(refreshed.body.identityNullifier, signedAddition.body.identityNullifier);
+
+  // Threshold removal: Bob is evicted, Alice signs alone, and the merged blob
+  // the enclave produced for the addition carries the state.
+  const removal = client.prepareRemoval({
+    kept: [descriptor(alice)],
+    remove: [descriptor(bob)],
+    escrowBlob: signedAddition.body.nextEscrowBlob!,
+    accountIdentityNullifier: signedAddition.body.identityNullifier,
+    nonce: "removal-session-nonce",
+  });
+  const signedRemoval = await client.submitRemoval({
+    prepared: removal,
+    signatures: {
+      [`evm:${alice.address.toLowerCase()}`]: signMessage(alice.privateKey, removal.message),
+    },
+  });
+  assert.equal(
+    signedRemoval.body.previousIdentityNullifier,
+    signedAddition.body.identityNullifier,
+  );
+  assert.equal(signedRemoval.body.walletNullifiers.length, 1);
+  assert.equal(signedRemoval.body.removedWalletNullifiers?.length, 1);
+
+  const removedRecord = await service.submit(signedRemoval, {
+    requestNonce: removal.nonce,
+  });
+  assert.equal((await store.listWallets(removedRecord.identityNullifier)).length, 1);
+  assert.equal(
+    (await store.getWalletOwners([signedRemoval.body.removedWalletNullifiers![0]!.walletNullifier]))
+      .size,
+    0,
+    "the removed wallet is freed for another account",
+  );
 });
 
 test("mock attestation requires the explicit flag", () => {

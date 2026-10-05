@@ -31,15 +31,21 @@ The system SHALL drive the full prove sequence (session nonce, enclave attestati
 
 ### Requirement: Guided membership transitions
 
-The system SHALL run wallet add/remove as one guided flow: prepare once, sign every enrolled wallet (removed wallets additionally sign removal consent), submit once, and require a fresh prove covering the complete new set.
+The system SHALL run wallet additions as one guided flow: prepare once, sign
+only the added wallets, submit once, and require the enclave to return the
+complete new set; the product SHALL NOT expose wallet removal.
 
 #### Scenario: Wallet added
 - **WHEN** a wallet is added to the account
-- **THEN** all wallets sign the new set, the backend receives a fresh escrow blob, and the stored bindings transition atomically
+- **THEN** only the new wallet signs, the backend receives the enclave-produced merged escrow blob, and the stored bindings transition atomically
 
 #### Scenario: Partial signatures
-- **WHEN** some wallets have signed and others have not
-- **THEN** the UI shows per-wallet progress and nothing is submitted until the set is complete
+- **WHEN** some added wallets have signed and others have not
+- **THEN** the UI shows per-wallet progress and nothing is submitted until the added set is complete
+
+#### Scenario: Removal requested
+- **WHEN** a client attempts to remove a wallet
+- **THEN** no UI path exists and the backend rejects any result carrying removals
 
 ### Requirement: Tier and top-3 display only
 

@@ -33,7 +33,7 @@ export declare const MAX_WALLET_LABEL = 32;
 /** Allocation categories used for category-level disclosure. */
 export declare const ALLOCATION_CATEGORIES: readonly ["stable", "majors", "altcoins", "other"];
 export type AllocationCategory = (typeof ALLOCATION_CATEGORIES)[number];
-export declare const POLICY_VERSION = "6figs-tee-2026-10-c";
+export declare const POLICY_VERSION = "6figs-tee-2026-10-d";
 /** Domain-separation tags. Changing any of these breaks all existing nullifiers. */
 export declare const DOMAIN: {
     readonly identity: "6figs-identity-v2";
@@ -41,6 +41,7 @@ export declare const DOMAIN: {
     readonly walletV2: "6figs-wallet-v2";
     readonly ownership: "6figs-ownership-v1";
     readonly walletRemoval: "6figs-wallet-removal-v1";
+    readonly walletThresholdRemoval: "6figs-wallet-threshold-removal-v1";
     readonly walletAddition: "6figs-wallet-add-v1";
     readonly enclaveKey: "6figs-enclave-key-v1";
     readonly enclaveResult: "6figs-registration-v1";
@@ -76,6 +77,21 @@ export declare function walletAdditionChallenge(params: {
     nonce: string;
 }): string;
 /**
+ * Message every kept wallet signs to evict one or more wallets. The removed
+ * wallet signs nothing, which is what makes a lost wallet recoverable. Names
+ * the account pseudonym and the removed wallet(s); kept wallets are implied by
+ * who signs, so the message does not grow with the kept set.
+ */
+export declare function walletThresholdRemovalChallenge(params: {
+    accountIdentityNullifier: string;
+    removals: readonly {
+        family: "evm" | "solana";
+        address: string;
+    }[];
+    timestamp: number;
+    nonce: string;
+}): string;
+/**
  * Message a wallet signs to detach itself from an account. Bound to the new
  * (kept) set commitment plus the request nonce, so the consent applies to
  * exactly one transition and cannot be reused as an ownership proof. The
@@ -102,6 +118,10 @@ export interface ChainConfig {
     readonly nativePriceId: string;
     /** CoinGecko "platform" slug for token price lookups. */
     readonly coingeckoPlatform: string;
+    /** GeckoTerminal network slug; chains without one are skipped by it. */
+    readonly geckoterminalNetwork?: string;
+    /** DexScreener chain id; chains without one are skipped by it. */
+    readonly dexscreenerChainId?: string;
     readonly nativeDecimals: number;
     readonly defaultRpcEnv: string;
 }

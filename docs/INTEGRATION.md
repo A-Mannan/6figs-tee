@@ -126,8 +126,34 @@ recomputed identity differs from `accountIdentityNullifier`, verifies only the
 added wallets, merges the set, and re-encrypts it. The backend then verifies
 `previousIdentityNullifier` equals the stored identity, every stored wallet is
 still present, the claimed `addedWalletNullifiers` are exactly the new ones,
-and persists `nextEscrowBlob`. Wallet removal is intentionally not supported:
-the backend rejects any result carrying removed wallets.
+and persists `nextEscrowBlob`.
+
+Removing a wallet (including a lost one) is a threshold transition: every kept
+wallet signs one compact challenge naming the removed wallet(s), and the
+removed wallet signs nothing. Your backend returns the stored identity and
+blob as for an addition; the client supplies the kept wallets and the address
+of the wallet to remove:
+
+```ts
+// `kept` are the wallets you still control; `remove` is the one to evict.
+const prepared = client.prepareRemoval({
+  kept,
+  remove: [{ family: "solana", chainId: 0, address: lostAddress }],
+  escrowBlob,                    // opaque; fetched from your backend
+  accountIdentityNullifier,      // stored identity
+  nonce: backendSessionNonce,    // single-use
+});
+
+// Every kept wallet signs prepared.message (the same string for all of them).
+const signatures = Object.fromEntries(
+  await Promise.all(kept.map(async (w) => [key(w), await sign(w, prepared.message)])),
+);
+
+const signed = await client.submitRemoval({ prepared, signatures });
+```
+
+The backend accepts it only when the stored set equals kept ∪ removed, the
+previous identity belongs to the session user, and at least one wallet remains.
 
 ## Backend (NestJS)
 
@@ -246,6 +272,8 @@ schema:
 | `SIXFIGS_RPC_*_SECONDARY` | enclave | optional redundant RPC per chain; value reads must agree within 0.1% |
 | `SIXFIGS_RPC_SOLANA_SECONDARY` | enclave | redundant Solana RPC, same agreement rule |
 | `SIXFIGS_NULLIFIER_KEY` | enclave | 64-hex secret for keyed nullifiers; required in production |
+| `COINGECKO_API_KEY` | enclave | raises CoinGecko rate limits (optional) |
+| `GECKOTERMINAL_API_KEY` | enclave | raises GeckoTerminal rate limits (optional) |
 | `SIXFIGS_ESCROW_KEY` | enclave | 64-hex persistent escrow key for `/recheck` and additions; dev/staging only (production requires `SIXFIGS_ALLOW_ENV_ESCROW_KEY=1` or KMS) |
 | `SIXFIGS_KMS_KEY` | enclave | Cloud KMS key resource that unwraps the escrow key; takes precedence over the env key |
 | `SIXFIGS_KMS_WRAPPED_ESCROW_KEY` | enclave | base64 ciphertext of the 32-byte escrow key, decryptable only by an attested workload |
@@ -254,7 +282,6 @@ schema:
 | `SIXFIGS_KMS_ATTESTATION_AUDIENCE` | enclave | optional launcher token audience (defaults to the STS audience) |
 | `SIXFIGS_KMS_AAD` | enclave | optional UTF-8 additional authenticated data bound to the wrapped key |
 | `SIXFIGS_ALLOW_ENV_ESCROW_KEY` | enclave | set to `1` to permit the env escrow key in production; dev-only escape hatch |
-| `COINGECKO_API_KEY` | enclave | raises pricing rate limits |
 | `SIXFIGS_ALLOWED_ORIGIN` | enclave | CORS origin; when unset no cross-origin headers are emitted |
 | `SIXFIGS_REGISTRATION_BUDGET_MS` | enclave | dev/test override for the 30 s registration budget (fails closed) |
 

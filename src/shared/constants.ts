@@ -55,7 +55,7 @@ export const MAX_WALLET_LABEL = 32;
 export const ALLOCATION_CATEGORIES = ["stable", "majors", "altcoins", "other"] as const;
 export type AllocationCategory = (typeof ALLOCATION_CATEGORIES)[number];
 
-export const POLICY_VERSION = "6figs-tee-2026-10-c";
+export const POLICY_VERSION = "6figs-tee-2026-10-d";
 
 /** Domain-separation tags. Changing any of these breaks all existing nullifiers. */
 export const DOMAIN = {
@@ -64,6 +64,7 @@ export const DOMAIN = {
   walletV2: "6figs-wallet-v2",
   ownership: "6figs-ownership-v1",
   walletRemoval: "6figs-wallet-removal-v1",
+  walletThresholdRemoval: "6figs-wallet-threshold-removal-v1",
   walletAddition: "6figs-wallet-add-v1",
   enclaveKey: "6figs-enclave-key-v1",
   enclaveResult: "6figs-registration-v1",
@@ -132,6 +133,39 @@ export function walletAdditionChallenge(params: {
 }
 
 /**
+ * Message every kept wallet signs to evict one or more wallets. The removed
+ * wallet signs nothing, which is what makes a lost wallet recoverable. Names
+ * the account pseudonym and the removed wallet(s); kept wallets are implied by
+ * who signs, so the message does not grow with the kept set.
+ */
+export function walletThresholdRemovalChallenge(params: {
+  accountIdentityNullifier: string;
+  removals: readonly { family: "evm" | "solana"; address: string }[];
+  timestamp: number;
+  nonce: string;
+}): string {
+  const removed = params.removals
+    .map((wallet) =>
+      wallet.family === "evm"
+        ? `  evm:${wallet.address.toLowerCase()}`
+        : `  solana:${wallet.address}`,
+    )
+    .sort();
+  return [
+    "6figs: remove wallet(s) from your account",
+    "",
+    `Domain: ${DOMAIN.walletThresholdRemoval}`,
+    `Account: ${params.accountIdentityNullifier}`,
+    "Removing:",
+    ...removed,
+    `Nonce: ${params.nonce}`,
+    `Issued At: ${new Date(params.timestamp).toISOString()}`,
+    "",
+    "Signing this removes the listed wallets from the account. It moves no funds.",
+  ].join("\n");
+}
+
+/**
  * Message a wallet signs to detach itself from an account. Bound to the new
  * (kept) set commitment plus the request nonce, so the consent applies to
  * exactly one transition and cannot be reused as an ownership proof. The
@@ -173,6 +207,10 @@ export interface ChainConfig {
   readonly nativePriceId: string;
   /** CoinGecko "platform" slug for token price lookups. */
   readonly coingeckoPlatform: string;
+  /** GeckoTerminal network slug; chains without one are skipped by it. */
+  readonly geckoterminalNetwork?: string;
+  /** DexScreener chain id; chains without one are skipped by it. */
+  readonly dexscreenerChainId?: string;
   readonly nativeDecimals: number;
   readonly defaultRpcEnv: string;
 }
@@ -185,6 +223,8 @@ export const CHAINS: readonly ChainConfig[] = [
     nativeSymbol: "ETH",
     nativePriceId: "ethereum",
     coingeckoPlatform: "ethereum",
+    geckoterminalNetwork: "eth",
+    dexscreenerChainId: "ethereum",
     nativeDecimals: 18,
     defaultRpcEnv: "SIXFIGS_RPC_ETHEREUM",
   },
@@ -195,6 +235,8 @@ export const CHAINS: readonly ChainConfig[] = [
     nativeSymbol: "ETH",
     nativePriceId: "ethereum",
     coingeckoPlatform: "base",
+    geckoterminalNetwork: "base",
+    dexscreenerChainId: "base",
     nativeDecimals: 18,
     defaultRpcEnv: "SIXFIGS_RPC_BASE",
   },
@@ -205,6 +247,8 @@ export const CHAINS: readonly ChainConfig[] = [
     nativeSymbol: "ETH",
     nativePriceId: "ethereum",
     coingeckoPlatform: "arbitrum-one",
+    geckoterminalNetwork: "arbitrum",
+    dexscreenerChainId: "arbitrum",
     nativeDecimals: 18,
     defaultRpcEnv: "SIXFIGS_RPC_ARBITRUM",
   },
@@ -215,6 +259,8 @@ export const CHAINS: readonly ChainConfig[] = [
     nativeSymbol: "ETH",
     nativePriceId: "ethereum",
     coingeckoPlatform: "optimistic-ethereum",
+    geckoterminalNetwork: "optimism",
+    dexscreenerChainId: "optimism",
     nativeDecimals: 18,
     defaultRpcEnv: "SIXFIGS_RPC_OPTIMISM",
   },
@@ -225,6 +271,8 @@ export const CHAINS: readonly ChainConfig[] = [
     nativeSymbol: "POL",
     nativePriceId: "matic-network",
     coingeckoPlatform: "polygon-pos",
+    geckoterminalNetwork: "polygon_pos",
+    dexscreenerChainId: "polygon",
     nativeDecimals: 18,
     defaultRpcEnv: "SIXFIGS_RPC_POLYGON",
   },
@@ -235,6 +283,8 @@ export const CHAINS: readonly ChainConfig[] = [
     nativeSymbol: "SOL",
     nativePriceId: "solana",
     coingeckoPlatform: "solana",
+    geckoterminalNetwork: "solana",
+    dexscreenerChainId: "solana",
     nativeDecimals: 9,
     defaultRpcEnv: "SIXFIGS_RPC_SOLANA",
   },
