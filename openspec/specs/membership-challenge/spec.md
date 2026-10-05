@@ -29,3 +29,18 @@ issue time, and SHALL NOT list the existing wallets.
 #### Scenario: Addition message reuse
 - **WHEN** an addition signature is presented for another nonce, timestamp, account, or wallet
 - **THEN** the enclave rejects it
+
+### Requirement: Threshold removal challenge
+
+The system SHALL present every kept wallet the same compact challenge binding
+the account's identity pseudonym, the removed wallet address(es), the request
+nonce, and the issue time, without listing the kept wallets or requiring the
+removed wallet's signature.
+
+#### Scenario: Removing a wallet
+- **WHEN** a removal is prepared
+- **THEN** each kept wallet signs a message naming the account pseudonym and the removed wallet(s)
+
+#### Scenario: Challenge reuse
+- **WHEN** a removal signature is presented for another nonce, timestamp, account, or removed set
+- **THEN** the enclave rejects it
