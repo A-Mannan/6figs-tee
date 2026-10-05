@@ -15,6 +15,14 @@ import {
 } from "./key-provider.ts";
 
 /**
+ * The key-attestation token the launcher mints has a short TTL (one hour). The
+ * hello response caches the ephemeral keys for the workload's lifetime, but the
+ * token must be re-minted before it expires or every client that verifies
+ * attestation will reject the enclave. Refresh comfortably inside the window.
+ */
+const HELLO_CACHE_TTL_MS = 30 * 60_000;
+
+/**
  * Owns the enclave's keys for the lifetime of the workload run. Signing and
  * session-encryption keys are ephemeral; the escrow key is loaded once at boot
  * through the configured provider (KMS, environment, or absent) so stored
@@ -29,6 +37,7 @@ export class EnclaveKeyManager {
   private loadedEscrow: LoadedEscrowKey | null = null;
   private loadPromise: Promise<LoadedEscrowKey> | null = null;
   private helloCache: EnclaveHello | null = null;
+  private helloCacheAt = 0;
   private readonly attestation: AttestationProvider;
 
   constructor(
@@ -78,7 +87,12 @@ export class EnclaveKeyManager {
   }
 
   async hello(policyVersion: string): Promise<EnclaveHello> {
-    if (this.helloCache) return this.helloCache;
+    if (
+      this.helloCache &&
+      Date.now() - this.helloCacheAt < HELLO_CACHE_TTL_MS
+    ) {
+      return this.helloCache;
+    }
     await this.ensureEscrowLoaded();
     const attestation = await this.attestation.buildKeyAttestation({
       signingPublicKey: this.keys.signingPublic,
@@ -102,6 +116,7 @@ export class EnclaveKeyManager {
       createdAt: Date.now(),
       attestation,
     };
+    this.helloCacheAt = Date.now();
     return this.helloCache;
   }
 }

@@ -386,6 +386,24 @@ test("enclave hello exposes a verifiable key attestation bound to all keys", asy
   );
 });
 
+test("enclave hello re-mints an expired key attestation instead of serving it stale", async () => {
+  const attestation = new MockAttestationProvider({});
+  const keys = new EnclaveKeyManager(attestation, "legacy-v1", {});
+  const realNow = Date.now;
+  try {
+    const first = await keys.hello("test-policy");
+    // Same cached response inside the TTL window.
+    const cached = await keys.hello("test-policy");
+    assert.equal(cached.attestation.attestationToken, first.attestation.attestationToken);
+    // Past the TTL, the launcher must be asked again for a fresh token.
+    Date.now = () => realNow() + 31 * 60_000;
+    const refreshed = await keys.hello("test-policy");
+    assert.notEqual(refreshed.attestation.attestationToken, first.attestation.attestationToken);
+  } finally {
+    Date.now = realNow;
+  }
+});
+
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   const out = new Uint8Array(a.length + b.length);
   out.set(a, 0);
