@@ -117,7 +117,6 @@ export function computeAllocation(positions) {
     if (total === 0n) {
         return {
             allocation: ALLOCATION_CATEGORIES.map((category) => ({ category, bps: 0 })),
-            stableBps: 0,
             totalMicroUsd: 0n,
         };
     }
@@ -140,6 +139,5 @@ export function computeAllocation(positions) {
         }
         allocation[largestIndex].bps += remainder;
     }
-    const stableBps = allocation.find((a) => a.category === "stable")?.bps ?? 0;
-    return { allocation, stableBps, totalMicroUsd: total };
+    return { allocation, totalMicroUsd: total };
 }

@@ -188,7 +188,6 @@ export async function registerPortfolio(
     tierFloorMicroUsd: tier.minMicroUsd.toString(),
     nextTierFloorMicroUsd: nextTierFloor(tier.id, tiers).toString(),
     portfolioBand: portfolioBand(valued.totalMicroUsd, tiers),
-    stableBps: valued.stableBps,
     topAssets: valued.topAssets,
     disclosure: request.disclosure,
     allocation: request.disclosure === "hidden" ? [] : valued.allocation,
@@ -330,7 +329,6 @@ async function registerAddition(
     tierFloorMicroUsd: tier.minMicroUsd.toString(),
     nextTierFloorMicroUsd: nextTierFloor(tier.id, tiers).toString(),
     portfolioBand: portfolioBand(valued.totalMicroUsd, tiers),
-    stableBps: valued.stableBps,
     topAssets: valued.topAssets,
     disclosure: request.disclosure,
     allocation: request.disclosure === "hidden" ? [] : valued.allocation,
@@ -428,7 +426,6 @@ export async function recheckPortfolio(
     tierFloorMicroUsd: tier.minMicroUsd.toString(),
     nextTierFloorMicroUsd: nextTierFloor(tier.id, tiers).toString(),
     portfolioBand: portfolioBand(valued.totalMicroUsd, tiers),
-    stableBps: valued.stableBps,
     topAssets: valued.topAssets,
     disclosure: "hidden",
     allocation: [],
@@ -490,7 +487,6 @@ function withLabels<
 
 interface ValuedBalances {
   allocation: RegistrationResultBody["allocation"];
-  stableBps: number;
   totalMicroUsd: bigint;
   topAssets: string[];
 }
@@ -517,10 +513,9 @@ async function valueBalances(
     holdings.push({ symbol: balance.symbol, valueMicroUsd: value });
   }
 
-  const { allocation, stableBps, totalMicroUsd } = computeAllocation(positions);
+  const { allocation, totalMicroUsd } = computeAllocation(positions);
   return {
     allocation,
-    stableBps,
     totalMicroUsd,
     topAssets: topAssetSymbols(holdings, totalMicroUsd),
   };

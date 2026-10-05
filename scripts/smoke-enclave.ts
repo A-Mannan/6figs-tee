@@ -78,7 +78,6 @@ console.log("registration ok:", {
   scheme: hello.nullifierScheme,
   tier: body.tier,
   band: body.portfolioBand,
-  stableBps: body.stableBps,
   topAssets: body.topAssets,
   policyVersion: body.policyVersion,
   walletCount: body.walletNullifiers.length,

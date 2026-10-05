@@ -89,7 +89,6 @@ export function recordFromBody(body) {
         tier: body.tier,
         tierLabel: body.tierLabel,
         portfolioBand: body.portfolioBand,
-        stableBps: body.stableBps,
         createdAt: body.createdAt,
         expiresAt: body.expiresAt,
     };

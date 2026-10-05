@@ -92,13 +92,16 @@ test("portfolioBand is coarse", () => {
 });
 
 test("allocation sums to 10000 bps", () => {
-  const { allocation, totalMicroUsd, stableBps } = computeAllocation([
+  const { allocation, totalMicroUsd } = computeAllocation([
     { category: "stable", valueMicroUsd: 50_000n * USD },
     { category: "majors", valueMicroUsd: 30_000n * USD },
     { category: "altcoins", valueMicroUsd: 20_000n * USD },
   ]);
   assert.equal(totalMicroUsd, 100_000n * USD);
-  assert.equal(stableBps, 5000);
+  assert.equal(
+    allocation.find((entry) => entry.category === "stable")?.bps,
+    5000,
+  );
   assert.equal(
     allocation.reduce((sum, entry) => sum + entry.bps, 0),
     10_000,
@@ -106,8 +109,7 @@ test("allocation sums to 10000 bps", () => {
 });
 
 test("allocation handles an empty portfolio", () => {
-  const { allocation, stableBps, totalMicroUsd } = computeAllocation([]);
+  const { allocation, totalMicroUsd } = computeAllocation([]);
   assert.equal(totalMicroUsd, 0n);
-  assert.equal(stableBps, 0);
   assert.equal(allocation.reduce((s, e) => s + e.bps, 0), 0);
 });

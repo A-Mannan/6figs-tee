@@ -113,8 +113,6 @@ export interface RegistrationResultBody {
   nextTierFloorMicroUsd: string;
   /** Coarse portfolio band, e.g. "<100k" | "100k-300k" | ... Never exact. */
   portfolioBand: string;
-  /** Basis points of portfolio in stablecoins, always disclosed (safe). */
-  stableBps: number;
   /** Up to three disclosed asset symbols ordered by value. Never amounts. */
   topAssets: string[];
   disclosure: Disclosure;

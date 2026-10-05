@@ -21,11 +21,12 @@ what would have to change to strengthen it further.
 ## What the backend knows
 
 Per user: a random-looking **identity nullifier**, a **tier**, a coarse
-**portfolio band** (`<100k`, `100k-300k`, `300k-500k`, `500k-1m`, `1m+`), a
-**stablecoin share** in basis points, up to three **disclosed asset symbols**
-(`topAssets`, never amounts), and one **wallet nullifier** per enrolled
-wallet. Users who choose `hidden` disclosure send no allocation at all, only
-tier and symbols. The backend additionally holds an **escrow blob**: the
+**portfolio band** (`<100k`, `100k-300k`, `300k-500k`, `500k-1m`, `1m+`), up to
+three **disclosed asset symbols** (`topAssets`, never amounts), and one
+**wallet nullifier** per enrolled wallet. No stablecoin share or allocation
+percentage is ever sent or stored. Users who choose `hidden` disclosure send no
+allocation at all, only tier and symbols. The backend additionally holds an
+**escrow blob**: the
 wallet set encrypted to the enclave escrow key. It is ciphertext to everyone
 but the enclave, which alone decrypts it inside a recheck to refresh the tier
 without new signatures.

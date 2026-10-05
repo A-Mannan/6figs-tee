@@ -48,6 +48,10 @@ signing path and cap the latter at the existing 20-wallet limit.
   plaintext address reads and writes are deleted, and wallet listings serve
   labels only. Legacy eligibility stops computing live balances because no
   address exists to read.
+- **Disclosure minimization.** The stablecoin share leaves the signed result
+  and the database, and the legacy per-chain percentage cache (`assetPct`)
+  leaves storage and friend views. `POLICY_VERSION` moves to
+  `6figs-tee-2026-10-c` so the wider body cannot be replayed.
 
 ## Capabilities
 
@@ -59,6 +63,8 @@ signing path and cap the latter at the existing 20-wallet limit.
 - `wallet-additions`: add-only transitions with new-wallet-only signatures,
   compact challenges, enclave-side escrow merge, and backend superset checks.
 - `address-retirement`: no readable address column; legacy balance reads dead.
+- `disclosure-minimization`: no stable share in results or storage, no
+  allocation percentages at rest or in friend views.
 
 ### Modified Capabilities
 - `membership-challenge`: the full-set challenge applies to establishment and

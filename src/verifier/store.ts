@@ -5,7 +5,6 @@ export interface StoredRegistration {
   tier: number;
   tierLabel: string;
   portfolioBand: string;
-  stableBps: number;
   createdAt: number;
   expiresAt: number;
 }
@@ -159,7 +158,6 @@ export function recordFromBody(body: RegistrationResultBody): StoredRegistration
     tier: body.tier,
     tierLabel: body.tierLabel,
     portfolioBand: body.portfolioBand,
-    stableBps: body.stableBps,
     createdAt: body.createdAt,
     expiresAt: body.expiresAt,
   };

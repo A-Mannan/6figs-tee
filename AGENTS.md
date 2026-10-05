@@ -73,15 +73,16 @@ Read `docs/ATTESTATION.md` for the exact nonce and claim mechanics.
 
 ## Privacy invariants (do not break)
 
-- The backend may store an identity nullifier, a tier, `portfolioBand`,
-  `stableBps`, wallet nullifiers, the disclosed `topAssets` symbols, and the
-  escrow blob (ciphertext only the enclave can decrypt). Nothing else.
+- The backend may store an identity nullifier, a tier, `portfolioBand`, wallet
+  nullifiers, the disclosed `topAssets` symbols, and the escrow blob
+  (ciphertext only the enclave can decrypt). Nothing else.
 - Never add a column, DTO field, or log line that can carry a plaintext or
   base64url address, a balance, a token amount, or an exact total. The escrow
   blob is the only address-bearing value that may rest outside the enclave,
   and it is opaque to everyone but the enclave.
-- The stablecoin share (`stableBps`) and up to three `topAssets` symbols are
-  intentionally disclosed. Amounts never are. Everything else about the
+- Up to three `topAssets` symbols are intentionally disclosed; amounts and
+  allocation percentages (including stablecoin share and legacy asset
+  percentages) never are and have no storage column. Everything else about the
   portfolio is gated by the request's `disclosure` mode: `hidden` sends no
   allocation, `category` sends bucketed bps, `full` may carry more.
 - Nullifiers are one-way. `walletNullifier = SHA-256("6figs-wallet-v1"|family|address)`

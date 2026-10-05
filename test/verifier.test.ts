@@ -45,7 +45,6 @@ async function makeSigned(overrides: Partial<RegistrationResultBody> = {}): Prom
     tierFloorMicroUsd: "300000000000",
     nextTierFloorMicroUsd: "500000000000",
     portfolioBand: "300k-500k",
-    stableBps: 4200,
     topAssets: ["ETH", "SOL"],
     disclosure: "category",
     allocation: [{ category: "stable", bps: 4200 }],

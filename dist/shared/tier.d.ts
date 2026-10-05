@@ -45,6 +45,5 @@ export interface CategorizedPosition {
  */
 export declare function computeAllocation(positions: CategorizedPosition[]): {
     allocation: AllocationEntry[];
-    stableBps: number;
     totalMicroUsd: bigint;
 };

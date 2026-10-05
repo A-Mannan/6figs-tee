@@ -103,7 +103,6 @@ export async function registerPortfolio(request, deps) {
         tierFloorMicroUsd: tier.minMicroUsd.toString(),
         nextTierFloorMicroUsd: nextTierFloor(tier.id, tiers).toString(),
         portfolioBand: portfolioBand(valued.totalMicroUsd, tiers),
-        stableBps: valued.stableBps,
         topAssets: valued.topAssets,
         disclosure: request.disclosure,
         allocation: request.disclosure === "hidden" ? [] : valued.allocation,
@@ -216,7 +215,6 @@ async function registerAddition(request, deps) {
         tierFloorMicroUsd: tier.minMicroUsd.toString(),
         nextTierFloorMicroUsd: nextTierFloor(tier.id, tiers).toString(),
         portfolioBand: portfolioBand(valued.totalMicroUsd, tiers),
-        stableBps: valued.stableBps,
         topAssets: valued.topAssets,
         disclosure: request.disclosure,
         allocation: request.disclosure === "hidden" ? [] : valued.allocation,
@@ -294,7 +292,6 @@ export async function recheckPortfolio(payload, deps) {
         tierFloorMicroUsd: tier.minMicroUsd.toString(),
         nextTierFloorMicroUsd: nextTierFloor(tier.id, tiers).toString(),
         portfolioBand: portfolioBand(valued.totalMicroUsd, tiers),
-        stableBps: valued.stableBps,
         topAssets: valued.topAssets,
         disclosure: "hidden",
         allocation: [],
@@ -356,10 +353,9 @@ async function valueBalances(rawBalances, pricing, deadline) {
         });
         holdings.push({ symbol: balance.symbol, valueMicroUsd: value });
     }
-    const { allocation, stableBps, totalMicroUsd } = computeAllocation(positions);
+    const { allocation, totalMicroUsd } = computeAllocation(positions);
     return {
         allocation,
-        stableBps,
         totalMicroUsd,
         topAssets: topAssetSymbols(holdings, totalMicroUsd),
     };

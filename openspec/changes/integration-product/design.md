@@ -59,7 +59,7 @@ Trust boundaries:
 5. Wallet adapter signs `prepared.message` for each wallet, sequentially with progress.
 6. Frontend encrypts the wallet set to `hello.escrowPublicKey` → `escrowBlob`.
 7. Frontend submits the envelope to the enclave, verifies the attested result, POSTs `{signed, escrowBlob}` to the backend.
-8. Backend verifies with `expectedNonce`, persists `TeeIdentity` (tier, band, stableBps, topAssets, escrowBlob) + `TeeWalletBinding`s, links to `userId`.
+8. Backend verifies with `expectedNonce`, persists `TeeIdentity` (tier, band, topAssets, escrowBlob) + `TeeWalletBinding`s, links to `userId`.
 9. Profile now renders tier badge, band, top-3 symbols.
 
 **Silent re-verification (TTL 1h):**
@@ -84,7 +84,7 @@ Trust boundaries:
 ## Decisions
 
 - **Four-tier identity mapping, shared helper.** The product thresholds now match the tee's; the helper maps 1→I … 4→IV and stays the single source both apps use. Dev builds mirror the product's devnet thresholds so faucet money exercises the real tier code.
-- **Top-3 symbols, never amounts.** `topAssets` is always disclosed (like `stableBps`), sanitized (`^[A-Z0-9]{1,10}$`), capped at 3, and each must hold ≥5% by value so dust/fingerprint tokens do not enter the profile. Alternative: full allocation under `disclosure` — rejected as a numeric leak the product does not need.
+- **Top-3 symbols, never amounts.** `topAssets` is always disclosed, sanitized (`^[A-Z0-9]{1,10}$`), capped at 3, and each must hold ≥5% by value so dust/fingerprint tokens do not enter the profile. Alternative: full allocation under `disclosure` — rejected as a numeric leak the product does not need. The stablecoin share was removed for the same reason (`integration-followups`).
 - **Escrow via the existing envelope.** X25519 + HKDF + AES-256-GCM already exists; the escrow key is a second long-lived keypair advertised in `/hello` and bound into the key attestation nonce. Alternative: backend-envelope to a per-boot key — rejected; rechecks must survive restarts.
 - **Backend-triggered recheck, lazy + locked.** One Redis lock per identity prevents stampedes; the enclave result is signed and nonce-bound, so the backend never has to trust the channel. Alternative: client-triggered probes — rejected; they cannot refresh inactive users and add wallet-signature friction.
 - **All-wallets-sign transitions stay.** Smoothness comes from one nonce, one modal, sequential signing, and resumable UX — not from weakening the invariant. A single leaked session must not be able to add a wallet and take over an account.

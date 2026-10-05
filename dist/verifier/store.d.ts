@@ -4,7 +4,6 @@ export interface StoredRegistration {
     tier: number;
     tierLabel: string;
     portfolioBand: string;
-    stableBps: number;
     createdAt: number;
     expiresAt: number;
 }

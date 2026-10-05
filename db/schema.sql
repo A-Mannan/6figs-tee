@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS identity (
   tier               INTEGER NOT NULL CHECK (tier BETWEEN 0 AND 4),
   tier_label         TEXT    NOT NULL,
   portfolio_band     TEXT    NOT NULL,
-  stable_bps         INTEGER NOT NULL CHECK (stable_bps BETWEEN 0 AND 10000),
   -- Up to three disclosed asset symbols; never amounts.
   top_assets         JSONB   NOT NULL DEFAULT '[]',
   policy_version     TEXT    NOT NULL,

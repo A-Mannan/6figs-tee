@@ -4,7 +4,7 @@ schema: spec-driven
 # This is shown to AI when creating artifacts.
 context: |
   Node >=22.6 ESM TypeScript, run directly via native type stripping (explicit .ts imports; no enums, namespaces, or parameter properties). Deps: @noble/curves + @noble/hashes only; WebCrypto for AES-GCM and browser JWT verification; raw JSON-RPC, no ethers/viem.
-  Every signed or hashed structure goes through canonicalJson. No request-body logging, ever. Mock attestation is dev-only (explicit flag). Privacy invariant: the backend stores only nullifiers, tier, portfolioBand, stableBps — never addresses, balances, or amounts. Verification fails closed.
+  Every signed or hashed structure goes through canonicalJson. No request-body logging, ever. Mock attestation is dev-only (explicit flag). Privacy invariant: the backend stores only nullifiers, tier, portfolioBand, and the disclosed top-3 symbols — never addresses, balances, amounts, stablecoin share, or allocation percentages. Verification fails closed.
   Docs: docs/ATTESTATION.md, docs/INTEGRATION.md, docs/SECURITY.md. Commands: npm test (node --test --experimental-strip-types), npm run typecheck (tsc --noEmit).
   OpenSpec: openspec/specs is current-truth behavior; changes live in openspec/changes/<name>/ with tasks.md as the resume point; mark checkboxes only when implemented AND verified.
 

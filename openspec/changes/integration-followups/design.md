@@ -134,6 +134,17 @@ through the Nest logger otherwise. Production boot fails without SMTP unless
 `passwordChangedAt` is bumped and `JwtGuard` rejects tokens whose `iat` precedes
 it, so a stolen session does not survive a rotation.
 
+### Disclosure minimization
+
+`stableBps` was derived from the category allocation and disclosed on every
+result; `EligibilityCache.assetPct` held per-chain percentages from the legacy
+path. The product shows symbols only, so both are dead weight with a privacy
+cost: they pin a numeric snapshot of the portfolio. Removing them is a signed
+body change, so `POLICY_VERSION` moves to `6figs-tee-2026-10-c` and the backend
+migration drops `TeeIdentity.stableBps` and `EligibilityCache.assetPct`.
+`computeAllocation` still returns the category buckets for `category`/`full`
+disclosure requests, but no caller stores or displays the stable share.
+
 ### `addressEnc` retirement
 
 A migration drops `Wallet.addressEnc`. `auth.service.ts` stops writing it;

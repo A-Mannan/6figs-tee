@@ -106,3 +106,13 @@ Dev-resolvable now; production gates:
   rebuilt) and update `docs/DEV-ENCLAVE.md` (doc note added; VM not rebuilt)
 - [x] 5.4 Update `docs/ATTESTATION.md` and `docs/SECURITY.md` for the new
   result fields, KMS trust statement, and add-only trade-off
+## 6. Disclosure minimization (owner request 2026-10-03)
+
+- [x] 6.1 Tee: drop `stableBps` from the signed body, `computeAllocation`,
+  `StoredRegistration`, `db/schema.sql`; bump `POLICY_VERSION` to
+  `6figs-tee-2026-10-c`; verified by tests/typecheck/build
+- [x] 6.2 Backend: migration drops `TeeIdentity.stableBps` and
+  `EligibilityCache.assetPct`; remove all reads/writes; friends view carries
+  tier only; verified by migration apply + typecheck/build/lint
+- [x] 6.3 Frontend: remove `stableBps`/`assetPct` from types and the friends
+  UI; verified by typecheck/lint/build
