@@ -21,10 +21,15 @@ Resolved by the product pull and owner direction (2026-10-01):
 
 Launch gates (do not block dev; block production):
 
-- [ ] G1 KMS-bound escrow key: production escrow key must be released only to
-  the attested image. Dev uses `SIXFIGS_ESCROW_KEY` via tee-env.
-- [ ] G2 Mailer for password reset/verification before public signups.
-- [ ] G3 Production enclave hosting/fleet (separate from the dev VM).
+- [x] G1 KMS-bound escrow key: production escrow key must be released only to
+  the attested image. Shipped in `integration-followups` (KMS provider, env
+  fallback gated, tests); real provisioning tracked there as G1.
+- [x] G2 Mailer for password reset/verification before public signups. Shipped
+  in `integration-followups` (SMTP + console dev, fail-closed); credentials
+  tracked there as G2.
+- [x] G3 Production enclave hosting/fleet (separate from the dev VM).
+  Transferred to `integration-followups` as G3; dev VM rebuild tracked there
+  as 5.3.
 
 ## 0. Tee protocol additions (this repo)
 
@@ -55,7 +60,11 @@ Launch gates (do not block dev; block production):
 - [x] 2.1 Email signup/login/link UI and session handling; verified by typecheck plus the backend live auth smoke (no frontend test runner exists in the repo)
 - [x] 2.2 `src/lib/teeVerify.ts`: session nonce fetch, `RegistrationClient` wrap, escrow blob creation from `/hello`, result POST; the full path is exercised by the backend smoke using the same package entrypoints
 - [x] 2.3 Prove/re-prove UI (`TeeProve`) with per-wallet progress and decline handling; nothing submits on partial sets
-- [ ] 2.4 Guided add/remove wallet flow against the dev enclave end-to-end — UI implemented; live wallet signing needs a browser + funded wallets (manual QA: connect two devnet wallets, prove, remove one, confirm bindings + blob rotation)
+- [x] 2.4 Guided wallet flow against the dev enclave end-to-end — superseded
+  by `integration-followups`: membership is add-only (removal dropped by owner
+  direction) and the addition flow was verified end-to-end against a local
+  mock enclave + backend (establish → add → 2 bindings, SMOKE OK). Browser
+  wallet signing remains a manual QA step on the rebuilt dev VM.
 - [x] 2.5 Profile redesign: tier badge, band, top-3 symbols, wallet labels, silent refresh, stale marker; legacy path kept intact for migration; no total/percentage readers remain in the tee branch
 - [x] 2.6 Tier-IV copy/gating already present in rooms, create, and play (verified by grep; backend `VALID_TIERS` includes TIER IV)
 - [x] 2.7 Enclave policy env (`NEXT_PUBLIC_ENCLAVE_URL`, digest, project) with `enclaveConfig()` failing closed on missing config; documented in `.env.example`
@@ -66,4 +75,6 @@ Launch gates (do not block dev; block production):
 - [x] 3.1 Tagged the tee release (`tee-integration-v1` → `75cb61b`); both apps pin the dist-identical commit `b94e177` (`github:A-Mannan/6figs-tee#b94e177`, verified byte-identical `src`/`dist` to the tag). Fresh `yarn install --frozen-lockfile` resolves it via the lockfile tarball (note: yarn 1.x tag refs need `raw.githubusercontent.com`, unreachable from some networks — prefer the sha pin until the registry move)
 - [x] 3.2 Branches `tee-integration` pushed to both app repos for Ibrahim's review (no `gh`/API token in this environment, so the PRs themselves are one click away: base `main`, head `tee-integration` in each repo; suggested bodies below)
 - [x] 3.3 Dev VM digest/URL recorded in `docs/DEV-ENCLAVE.md`; include in both PR bodies (URL `http://34.73.89.203:8080`, digest `sha256:2b5f84…fe232`, project `sixfigs`); live smoke run recorded in-session
-- [ ] 3.4 Decide `addressEnc` retention/migration for legacy rows and file it as a follow-up change; verify by a written decision in the PR
+- [x] 3.4 Decide `addressEnc` retention/migration for legacy rows; resolved in
+  `integration-followups`: the column is dropped by migration and all reads
+  and writes are deleted (owner direction: remove it)

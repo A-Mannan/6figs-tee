@@ -18,6 +18,8 @@ Dev-resolvable now; production gates:
   GCP credentials are required to smoke the live path.
 - [ ] G2 SMTP credentials — production boot refuses without SMTP (or the
   explicit console override).
+- [ ] G3 Production enclave hosting/fleet (separate from the dev VM),
+  transferred from `integration-product`; includes the dev VM rebuild at 5.3.
 
 ## 0. KMS-bound escrow key (tee)
 
@@ -51,8 +53,10 @@ Dev-resolvable now; production gates:
 - [x] 1.5 Server/limits: add requests use the same envelope, nonce replay
   cache, rate limit, and concurrency gate; body-limit and 20-wallet blob-size
   test; verified by limits/e2e tests
-- [ ] 1.6 Rebuild `dist/` and record the commit for the app pins; verified by
-  `npm run build` + NodeNext consumer import (dist built; commit pending)
+- [x] 1.6 Rebuild `dist/` and record the commit for the app pins; verified by
+  `npm run build` and both apps typechecking/building against the pinned
+  `@sixfigs/tee#eecdd9c` (30dde9f was the addition commit; eecdd9c adds the
+  disclosure trim)
 
 ## 2. Backend mailer and recovery (`6FIGS.XYZ_backend`)
 
