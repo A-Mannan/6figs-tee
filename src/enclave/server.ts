@@ -20,6 +20,7 @@ import {
   CoinGeckoPricing,
   DexScreenerPricing,
   GeckoTerminalPricing,
+  StaticPricing,
   type PricingProvider,
 } from "./pricing.ts";
 import { recheckPortfolio, registerPortfolio, RegistrationError } from "./registration.ts";
@@ -50,22 +51,27 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
       : new ConfidentialSpaceAttestationProvider(env));
   const devChains = env.SIXFIGS_DEV_CHAINS === "1";
   const priceTtl = env.SIXFIGS_PRICE_TTL_MS ? { ttlMs: Number(env.SIXFIGS_PRICE_TTL_MS) } : {};
+  // Insecure-dev balances are deterministic and offline; pairing them with a
+  // fixed price keeps the whole dev path independent of external APIs.
+  const insecureBalances = env.SIXFIGS_DEV_INSECURE_BALANCES === "1";
   const pricing =
     options.pricing ??
-    new CoinGeckoPricing({
-      ...(env.COINGECKO_API_KEY ? { apiKey: env.COINGECKO_API_KEY } : {}),
-      ...priceTtl,
-      ...(devChains ? { devChains: true } : {}),
-      fallback: new GeckoTerminalPricing({
-        ...(env.GECKOTERMINAL_API_KEY ? { apiKey: env.GECKOTERMINAL_API_KEY } : {}),
-        ...priceTtl,
-        ...(devChains ? { devChains: true } : {}),
-        fallback: new DexScreenerPricing({
+    (insecureBalances
+      ? new StaticPricing({}, 3000)
+      : new CoinGeckoPricing({
+          ...(env.COINGECKO_API_KEY ? { apiKey: env.COINGECKO_API_KEY } : {}),
           ...priceTtl,
           ...(devChains ? { devChains: true } : {}),
-        }),
-      }),
-    });
+          fallback: new GeckoTerminalPricing({
+            ...(env.GECKOTERMINAL_API_KEY ? { apiKey: env.GECKOTERMINAL_API_KEY } : {}),
+            ...priceTtl,
+            ...(devChains ? { devChains: true } : {}),
+            fallback: new DexScreenerPricing({
+              ...priceTtl,
+              ...(devChains ? { devChains: true } : {}),
+            }),
+          }),
+        }));
 
   const nullifier = selectNullifierScheme(env);
   const keyManager = new EnclaveKeyManager(
@@ -81,7 +87,12 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
   const allowedOrigin = env.SIXFIGS_ALLOWED_ORIGIN ?? null;
 
   const server = createServer((req, res) => {
-    void handle(req, res).catch(() => {
+    void handle(req, res).catch((error: unknown) => {
+      // Dev-only stack logging. Never logs request bodies; disabled by default
+      // so production responses stay generic.
+      if (env.SIXFIGS_DEBUG_ERRORS === "1") {
+        console.error("[enclave] unhandled error", error);
+      }
       writeJson(res, 500, {
         error: "internal_error",
         message: "the enclave failed to process the request",
