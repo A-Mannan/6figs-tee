@@ -4,14 +4,14 @@ import {
   generateEnclaveKeys,
   type EnclaveKeys,
 } from "../shared/attestation.ts";
-import type { NullifierSchemeName } from "../shared/nullifiers.ts";
+import type { NullifierScheme } from "../shared/nullifiers.ts";
 import type { EnclaveHello } from "../shared/types.ts";
 import type { AttestationProvider } from "./attestation-provider.ts";
 import {
   selectEscrowKeyProvider,
   type EscrowKeyProvider,
   type EscrowKeyProviderKind,
-  type LoadedEscrowKey,
+  type LoadedSecrets,
 } from "./key-provider.ts";
 
 /**
@@ -32,17 +32,17 @@ const HELLO_CACHE_TTL_MS = 30 * 60_000;
  */
 export class EnclaveKeyManager {
   readonly keys: EnclaveKeys;
-  readonly nullifierScheme: NullifierSchemeName;
+  readonly nullifierScheme: NullifierScheme;
   readonly provider: EscrowKeyProvider;
-  private loadedEscrow: LoadedEscrowKey | null = null;
-  private loadPromise: Promise<LoadedEscrowKey> | null = null;
+  private loadedSecrets: LoadedSecrets | null = null;
+  private loadPromise: Promise<LoadedSecrets> | null = null;
   private helloCache: EnclaveHello | null = null;
   private helloCacheAt = 0;
   private readonly attestation: AttestationProvider;
 
   constructor(
     attestation: AttestationProvider,
-    nullifierScheme: NullifierSchemeName,
+    nullifierScheme: NullifierScheme,
     env: NodeJS.ProcessEnv = process.env,
     provider?: EscrowKeyProvider,
   ) {
@@ -59,7 +59,7 @@ export class EnclaveKeyManager {
   }
 
   get escrowPersistent(): boolean {
-    return this.loadedEscrow !== null && this.loadedEscrow.privateKey !== null;
+    return this.loadedSecrets !== null && this.loadedSecrets.escrowPrivateKey !== null;
   }
 
   get escrowKeyProvider(): EscrowKeyProviderKind {
@@ -67,23 +67,27 @@ export class EnclaveKeyManager {
   }
 
   get escrowKeyId(): string | undefined {
-    return this.loadedEscrow?.keyId;
+    return this.loadedSecrets?.keyId;
   }
 
   /**
-   * Resolve the escrow key exactly once. A failure is sticky and must prevent
-   * the server from listening: a KMS-configured enclave that cannot unwrap its
-   * key is not allowed to answer with a key it does not hold.
+   * Resolve the persistent secrets exactly once. A failure is sticky and must
+   * prevent the server from listening: a KMS-configured enclave that cannot
+   * unwrap its keys is not allowed to answer with keys it does not hold.
    */
   async ensureEscrowLoaded(): Promise<void> {
-    if (this.loadedEscrow) return;
+    if (this.loadedSecrets) return;
     this.loadPromise ??= this.provider.load();
     const loaded = await this.loadPromise;
-    if (loaded.privateKey) {
-      this.keys.escrowPrivate = loaded.privateKey;
-      this.keys.escrowPublic = x25519.getPublicKey(loaded.privateKey);
+    if (loaded.escrowPrivateKey) {
+      this.keys.escrowPrivate = loaded.escrowPrivateKey;
+      this.keys.escrowPublic = x25519.getPublicKey(loaded.escrowPrivateKey);
     }
-    this.loadedEscrow = loaded;
+    if (loaded.nullifierKey) this.nullifierScheme.setKey!(loaded.nullifierKey);
+    if (this.nullifierScheme.pending) {
+      throw new Error("the configured key provider did not release the nullifier key");
+    }
+    this.loadedSecrets = loaded;
   }
 
   async hello(policyVersion: string): Promise<EnclaveHello> {
@@ -109,7 +113,7 @@ export class EnclaveKeyManager {
       escrowPublicKey: publicKeys.escrowPublicKey,
       escrowKeyProvider: this.provider.kind,
       ...(this.escrowKeyId ? { escrowKeyId: this.escrowKeyId } : {}),
-      nullifierScheme: this.nullifierScheme,
+      nullifierScheme: this.nullifierScheme.name,
       keyId: publicKeys.keyId,
       projectId: this.attestation.projectId,
       zone: this.attestation.zone,

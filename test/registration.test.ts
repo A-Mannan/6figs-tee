@@ -23,6 +23,7 @@ import {
   walletEntriesFromAddresses,
   walletNullifier,
   walletSetNullifier,
+  type NullifierScheme,
 } from "../src/shared/nullifiers.ts";
 import { randomBytes } from "../src/shared/crypto.ts";
 import { base58Encode } from "../src/shared/base58.ts";
@@ -81,7 +82,7 @@ function buildRequest(wallets: WalletInput[], overrides: Partial<RegistrationReq
 
 function deps(prices: Record<string, number> = {}) {
   const attestation = new MockAttestationProvider({});
-  const keys = new EnclaveKeyManager(attestation, "legacy-v1", {});
+  const keys = new EnclaveKeyManager(attestation, LEGACY_NULLIFIER_SCHEME, {});
   return {
     keys: keys.keys,
     attestation,
@@ -292,7 +293,7 @@ test("registerPortfolio aborts when the registration budget is exceeded", async 
     },
   };
   const attestation = new MockAttestationProvider({});
-  const keys = new EnclaveKeyManager(attestation, "legacy-v1", {});
+  const keys = new EnclaveKeyManager(attestation, LEGACY_NULLIFIER_SCHEME, {});
   await assert.rejects(
     () =>
       registerPortfolio(request, {
@@ -326,7 +327,11 @@ test("registerPortfolio derives unguessable nullifiers under the keyed scheme", 
 
   const scheme = keyedNullifierScheme(randomBytes(32));
   const attestation = new MockAttestationProvider({});
-  const keys = new EnclaveKeyManager(attestation, "keyed-v1", {});
+  const keys = new EnclaveKeyManager(
+    attestation,
+    keyedNullifierScheme(randomBytes(32)),
+    {},
+  );
   const run = () =>
     registerPortfolio(request, {
       keys: keys.keys,
@@ -370,7 +375,7 @@ test("wallet and identity nullifiers are deterministic and set-scoped", () => {
 
 test("enclave hello exposes a verifiable key attestation bound to all keys", async () => {
   const attestation = new MockAttestationProvider({});
-  const keys = new EnclaveKeyManager(attestation, "legacy-v1", {});
+  const keys = new EnclaveKeyManager(attestation, LEGACY_NULLIFIER_SCHEME, {});
   const hello = await keys.hello("test-policy");
   assert.equal(hello.keyId, exportPublicKeys(keys.keys).keyId);
   assert.equal(hello.provider, "mock");
@@ -388,7 +393,7 @@ test("enclave hello exposes a verifiable key attestation bound to all keys", asy
 
 test("enclave hello re-mints an expired key attestation instead of serving it stale", async () => {
   const attestation = new MockAttestationProvider({});
-  const keys = new EnclaveKeyManager(attestation, "legacy-v1", {});
+  const keys = new EnclaveKeyManager(attestation, LEGACY_NULLIFIER_SCHEME, {});
   const realNow = Date.now;
   try {
     const first = await keys.hello("test-policy");
@@ -432,7 +437,7 @@ test("prepare() adopts a caller nonce and it round-trips into body.nonce", async
 test("registerPortfolio merges an addition from the escrow blob and signs the transition", async () => {
   const escrowHex = Buffer.from(randomBytes(32)).toString("hex");
   const attestation = new MockAttestationProvider({});
-  const manager = new EnclaveKeyManager(attestation, "keyed-v1", {
+  const manager = new EnclaveKeyManager(attestation, keyedNullifierScheme(randomBytes(32)), {
     SIXFIGS_ESCROW_KEY: escrowHex,
     NODE_ENV: "test",
   } as NodeJS.ProcessEnv);
@@ -520,7 +525,7 @@ test("registerPortfolio refuses additions without persistent escrow material", a
 test("registerPortfolio refuses an addition whose blob belongs to another account", async () => {
   const escrowHex = Buffer.from(randomBytes(32)).toString("hex");
   const attestation = new MockAttestationProvider({});
-  const manager = new EnclaveKeyManager(attestation, "legacy-v1", {
+  const manager = new EnclaveKeyManager(attestation, LEGACY_NULLIFIER_SCHEME, {
     SIXFIGS_ESCROW_KEY: escrowHex,
     NODE_ENV: "test",
   } as NodeJS.ProcessEnv);
@@ -603,7 +608,7 @@ test("prepareAddition keeps the consent compact and the identity fixed-length", 
   assert.equal(twenty.length, 64);
 });
 
-function escrowManager(escrowHex: string, scheme: "legacy-v1" | "keyed-v1") {
+function escrowManager(escrowHex: string, scheme: NullifierScheme) {
   const attestation = new MockAttestationProvider({});
   const manager = new EnclaveKeyManager(attestation, scheme, {
     SIXFIGS_ESCROW_KEY: escrowHex,
@@ -615,7 +620,7 @@ function escrowManager(escrowHex: string, scheme: "legacy-v1" | "keyed-v1") {
 test("registerPortfolio prunes a wallet when every kept wallet signs", async () => {
   const { attestation, manager } = escrowManager(
     Buffer.from(randomBytes(32)).toString("hex"),
-    "legacy-v1",
+    LEGACY_NULLIFIER_SCHEME,
   );
   await manager.ensureEscrowLoaded();
 
@@ -685,7 +690,7 @@ test("registerPortfolio prunes a wallet when every kept wallet signs", async () 
 test("registerPortfolio refuses a removal missing a kept wallet signature", async () => {
   const { attestation, manager } = escrowManager(
     Buffer.from(randomBytes(32)).toString("hex"),
-    "legacy-v1",
+    LEGACY_NULLIFIER_SCHEME,
   );
   await manager.ensureEscrowLoaded();
 
@@ -729,7 +734,7 @@ test("registerPortfolio refuses a removal missing a kept wallet signature", asyn
 test("registerPortfolio refuses removing an unknown wallet or every wallet", async () => {
   const { attestation, manager } = escrowManager(
     Buffer.from(randomBytes(32)).toString("hex"),
-    "legacy-v1",
+    LEGACY_NULLIFIER_SCHEME,
   );
   await manager.ensureEscrowLoaded();
 

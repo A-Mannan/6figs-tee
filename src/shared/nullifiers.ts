@@ -13,6 +13,10 @@ export type NullifierSchemeName = "legacy-v1" | "keyed-v1";
 export interface NullifierScheme {
   readonly name: NullifierSchemeName;
   walletNullifier(family: string, address: string): string;
+  /** True while a keyed scheme waits for key material from the boot provider. */
+  readonly pending?: boolean;
+  /** Delivers key material to a pending keyed scheme; never called on legacy. */
+  setKey?(key: Uint8Array): void;
 }
 
 /** wallet_nullifier = SHA-256(domain || family || normalizedAddress). One-way. */
@@ -28,15 +32,25 @@ export const LEGACY_NULLIFIER_SCHEME: NullifierScheme = {
 
 /**
  * Keyed scheme. The separate v2 domain tag keeps the two formulas from ever
- * colliding, even if the key leaks.
+ * colliding, even if the key leaks. Constructed without a key when boot-time
+ * KMS unwrap is configured; hashing before the key arrives throws.
  */
-export function keyedNullifierScheme(key: Uint8Array): NullifierScheme {
-  const keyCopy = key.slice();
+export function keyedNullifierScheme(key?: Uint8Array): NullifierScheme {
+  let material: Uint8Array | null = key ? key.slice() : null;
   return {
     name: "keyed-v1",
+    get pending(): boolean {
+      return material === null;
+    },
+    setKey(next: Uint8Array): void {
+      material = next.slice();
+    },
     walletNullifier(family: string, address: string): string {
+      if (material === null) {
+        throw new Error("nullifier key has not been loaded");
+      }
       const normalized = family === "evm" ? address.toLowerCase() : address;
-      return hmacSha256Hex(keyCopy, `${DOMAIN.walletV2}|${family}|${normalized}`);
+      return hmacSha256Hex(material, `${DOMAIN.walletV2}|${family}|${normalized}`);
     },
   };
 }

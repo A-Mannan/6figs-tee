@@ -1,8 +1,32 @@
+import { isIP } from "node:net";
+
 /**
  * In-memory request controls for the single enclave instance. These bound the
  * damage one client can do to provider quotas and the event loop; they are not
  * a substitute for load-balancer rate limiting.
  */
+
+/**
+ * Rate-limit key for a request. Behind the GCP external Application Load
+ * Balancer the socket peer is the GFE, and the client address is the
+ * second-to-last `X-Forwarded-For` entry: the balancer appends
+ * `<client-ip>,<load-balancer-ip>` after any client-supplied values, which are
+ * never trusted. Absent or malformed input falls back to the socket peer, so
+ * failures share a bucket instead of evading the limit.
+ */
+export function clientAddress(
+  remoteAddress: string | undefined,
+  forwardedFor: string | string[] | undefined,
+  trustProxy: boolean,
+): string {
+  const peer = remoteAddress ?? "unknown";
+  if (!trustProxy || forwardedFor === undefined) return peer;
+  const raw = Array.isArray(forwardedFor) ? forwardedFor.join(",") : forwardedFor;
+  const entries = raw.split(",");
+  if (entries.length < 2) return peer;
+  const candidate = entries[entries.length - 2]!.trim();
+  return isIP(candidate) !== 0 ? candidate : peer;
+}
 
 /** Fixed-window per-key limiter. Windows are pruned once the map grows. */
 export class FixedWindowRateLimiter {

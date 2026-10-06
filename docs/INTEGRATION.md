@@ -86,7 +86,12 @@ await fetch("/api/verify", {
 ```
 
 `signed.body` carries `tier`, `portfolioBand`, and `topAssets` (up to three
-symbols, never amounts) — that is everything the profile may show. Rechecks
+symbols, never amounts) — that is everything the profile may show. Removals
+also need no signatures: after checking the session owns the account, the
+backend calls `RemovalClient.remove` with the stored `escrowBlob`,
+`identityNullifier`, and the wallet nullifiers to detach; it verifies the
+result, then replaces the commitment, `nextEscrowBlob`, and bindings for the
+same `userId`, rejecting any set that is not stored-minus-target. Rechecks
 need no signatures: the backend replays the stored `escrowBlob` to the enclave,
 which decrypts it inside, re-fetches balances, and returns a fresh attested
 result.
@@ -277,12 +282,14 @@ schema:
 | `SIXFIGS_ESCROW_KEY` | enclave | 64-hex persistent escrow key for `/recheck` and additions; dev/staging only (production requires `SIXFIGS_ALLOW_ENV_ESCROW_KEY=1` or KMS) |
 | `SIXFIGS_KMS_KEY` | enclave | Cloud KMS key resource that unwraps the escrow key; takes precedence over the env key |
 | `SIXFIGS_KMS_WRAPPED_ESCROW_KEY` | enclave | base64 ciphertext of the 32-byte escrow key, decryptable only by an attested workload |
+| `SIXFIGS_KMS_WRAPPED_NULLIFIER_KEY` | enclave | optional base64 ciphertext of the 32-byte nullifier key; when set, no nullifier key is read from the environment |
 | `SIXFIGS_KMS_STS_AUDIENCE` | enclave | workload identity provider audience for the STS exchange |
 | `SIXFIGS_KMS_SERVICE_ACCOUNT` | enclave | optional service account to impersonate before calling KMS |
 | `SIXFIGS_KMS_ATTESTATION_AUDIENCE` | enclave | optional launcher token audience (defaults to the STS audience) |
 | `SIXFIGS_KMS_AAD` | enclave | optional UTF-8 additional authenticated data bound to the wrapped key |
 | `SIXFIGS_ALLOW_ENV_ESCROW_KEY` | enclave | set to `1` to permit the env escrow key in production; dev-only escape hatch |
-| `SIXFIGS_ALLOWED_ORIGIN` | enclave | CORS origin; when unset no cross-origin headers are emitted |
+| `SIXFIGS_ALLOWED_ORIGIN` | enclave | CORS origin; when unset no cross-origin headers are emitted; `*` is honored for testing only |
+| `SIXFIGS_TRUST_PROXY` | enclave | set to `1` behind the GCP load balancer so rate limiting keys on the client IP the balancer appends to `X-Forwarded-For`, not the GFE address; requires a firewall restricted to the GFE ranges |
 | `SIXFIGS_REGISTRATION_BUDGET_MS` | enclave | dev/test override for the 30 s registration budget (fails closed) |
 
 ## Local end-to-end

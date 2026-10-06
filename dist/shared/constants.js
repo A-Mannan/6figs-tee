@@ -39,7 +39,7 @@ export const TOP_ASSETS_MIN_BPS = 500;
 export const MAX_WALLET_LABEL = 32;
 /** Allocation categories used for category-level disclosure. */
 export const ALLOCATION_CATEGORIES = ["stable", "majors", "altcoins", "other"];
-export const POLICY_VERSION = "6figs-tee-2026-10-d";
+export const POLICY_VERSION = "6figs-tee-2026-10-e";
 /** Domain-separation tags. Changing any of these breaks all existing nullifiers. */
 export const DOMAIN = {
     identity: "6figs-identity-v2",

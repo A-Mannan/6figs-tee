@@ -1,5 +1,6 @@
 import { hexToBytes } from "../shared/crypto.js";
 const ESCROW_KEY_BYTES = 32;
+const NULLIFIER_KEY_BYTES = 32;
 export class EnvEscrowKeyProvider {
     kind = "env";
     raw;
@@ -10,13 +11,13 @@ export class EnvEscrowKeyProvider {
         if (!/^[0-9a-fA-F]{64}$/.test(this.raw)) {
             throw new Error("SIXFIGS_ESCROW_KEY must be 64 hex characters (32 bytes)");
         }
-        return { privateKey: hexToBytes(this.raw), provider: "env" };
+        return { escrowPrivateKey: hexToBytes(this.raw), provider: "env" };
     }
 }
 export class NoneEscrowKeyProvider {
     kind = "none";
     async load() {
-        return { privateKey: null, provider: "none" };
+        return { escrowPrivateKey: null, provider: "none" };
     }
 }
 const STS_ENDPOINT = "https://sts.googleapis.com/v1/token";
@@ -48,11 +49,23 @@ export class GcpKmsEscrowKeyProvider {
         const accessToken = this.options.serviceAccount
             ? await this.impersonate(federated, this.options.serviceAccount)
             : federated;
-        const plaintext = await this.decrypt(accessToken);
-        if (plaintext.length !== ESCROW_KEY_BYTES) {
-            throw new Error(`KMS released ${plaintext.length} bytes; the escrow key must be ${ESCROW_KEY_BYTES}`);
+        const escrowKey = await this.decrypt(accessToken, this.options.wrappedKey);
+        if (escrowKey.length !== ESCROW_KEY_BYTES) {
+            throw new Error(`KMS released ${escrowKey.length} bytes; the escrow key must be ${ESCROW_KEY_BYTES}`);
         }
-        return { privateKey: plaintext, provider: "kms", keyId: this.options.kmsKey };
+        const loaded = {
+            escrowPrivateKey: escrowKey,
+            provider: "kms",
+            keyId: this.options.kmsKey,
+        };
+        if (this.options.wrappedNullifierKey) {
+            const nullifierKey = await this.decrypt(accessToken, this.options.wrappedNullifierKey);
+            if (nullifierKey.length !== NULLIFIER_KEY_BYTES) {
+                throw new Error(`KMS released ${nullifierKey.length} bytes; the nullifier key must be ${NULLIFIER_KEY_BYTES}`);
+            }
+            loaded.nullifierKey = nullifierKey;
+        }
+        return loaded;
     }
     async exchange(subjectToken) {
         const body = new URLSearchParams({
@@ -96,7 +109,7 @@ export class GcpKmsEscrowKeyProvider {
         }
         return parsed.accessToken;
     }
-    async decrypt(accessToken) {
+    async decrypt(accessToken, wrapped) {
         const response = await this.fetchImpl(`${KMS_ENDPOINT}/${this.options.kmsKey}:decrypt`, {
             method: "POST",
             headers: {
@@ -104,7 +117,7 @@ export class GcpKmsEscrowKeyProvider {
                 "content-type": "application/json",
             },
             body: JSON.stringify({
-                ciphertext: Buffer.from(this.options.wrappedKey).toString("base64"),
+                ciphertext: Buffer.from(wrapped).toString("base64"),
                 ...(this.options.additionalAuthenticatedData
                     ? {
                         additionalAuthenticatedData: Buffer.from(this.options.additionalAuthenticatedData).toString("base64"),
@@ -142,9 +155,13 @@ export function selectEscrowKeyProvider(attestation, env = process.env) {
         const serviceAccount = (env.SIXFIGS_KMS_SERVICE_ACCOUNT ?? "").trim();
         const attestationAudience = (env.SIXFIGS_KMS_ATTESTATION_AUDIENCE ?? "").trim();
         const aad = env.SIXFIGS_KMS_AAD;
+        const wrappedNullifier = (env.SIXFIGS_KMS_WRAPPED_NULLIFIER_KEY ?? "").trim();
         return new GcpKmsEscrowKeyProvider({
             kmsKey,
             wrappedKey: new Uint8Array(Buffer.from(wrapped, "base64")),
+            ...(wrappedNullifier
+                ? { wrappedNullifierKey: new Uint8Array(Buffer.from(wrappedNullifier, "base64")) }
+                : {}),
             stsAudience,
             ...(serviceAccount ? { serviceAccount } : {}),
             ...(attestationAudience ? { attestationAudience } : {}),

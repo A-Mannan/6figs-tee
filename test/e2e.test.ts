@@ -13,6 +13,7 @@ import { StaticPricing } from "../src/enclave/pricing.ts";
 import { RegistrationClient, type PreparedRegistration } from "../src/client/register.ts";
 import { encryptEscrowBlob } from "../src/client/escrow.ts";
 import { RecheckClient } from "../src/client/recheck.ts";
+import { RemovalClient } from "../src/client/removal.ts";
 import { AttestationVerifier } from "../src/verifier/index.ts";
 import { RegistrationService } from "../src/verifier/service.ts";
 import { InMemoryNullifierStore } from "../src/verifier/store.ts";
@@ -580,6 +581,185 @@ test("escrow recheck round trip through HTTP", async () => {
       (error: unknown) => error as { code?: string },
     );
   assert.equal(mismatch?.code, "identity_mismatch");
+});
+
+test("CORS origin is emitted only when configured, wildcard included", async () => {
+  const withWildcard = createEnclaveServer({
+    env: {
+      SIXFIGS_MOCK_ATTESTATION: "1",
+      SIXFIGS_DEV_INSECURE_BALANCES: "1",
+      SIXFIGS_ALLOWED_ORIGIN: "*",
+      NODE_ENV: "test",
+    } as NodeJS.ProcessEnv,
+    attestation: new MockAttestationProvider({}),
+    pricing: new StaticPricing({}, 3000),
+    port: 0,
+  });
+  const wildcardPort = (await withWildcard.listen()).port;
+  after(() => withWildcard.server.close());
+  const wildcard = await fetch(`http://127.0.0.1:${wildcardPort}/healthz`);
+  assert.equal(wildcard.headers.get("access-control-allow-origin"), "*");
+
+  const unconfigured = createEnclaveServer({
+    env: {
+      SIXFIGS_MOCK_ATTESTATION: "1",
+      SIXFIGS_DEV_INSECURE_BALANCES: "1",
+      NODE_ENV: "test",
+    } as NodeJS.ProcessEnv,
+    attestation: new MockAttestationProvider({}),
+    pricing: new StaticPricing({}, 3000),
+    port: 0,
+  });
+  const barePort = (await unconfigured.listen()).port;
+  after(() => unconfigured.server.close());
+  const bare = await fetch(`http://127.0.0.1:${barePort}/healthz`);
+  assert.equal(bare.headers.get("access-control-allow-origin"), null);
+});
+
+test("trusted proxy mode keys the rate limit on the appended client IP", async () => {
+  const app = createEnclaveServer({
+    env: {
+      SIXFIGS_MOCK_ATTESTATION: "1",
+      SIXFIGS_DEV_INSECURE_BALANCES: "1",
+      SIXFIGS_TRUST_PROXY: "1",
+      NODE_ENV: "test",
+    } as NodeJS.ProcessEnv,
+    attestation: new MockAttestationProvider({}),
+    pricing: new StaticPricing({}, 3000),
+    port: 0,
+  });
+  const { port } = await app.listen();
+  after(() => app.server.close());
+
+  const post = (forwardedFor: string) =>
+    fetch(`http://127.0.0.1:${port}/recheck`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": forwardedFor },
+      body: "{}",
+    });
+
+  // Rotating the client-supplied prefix must not buy a fresh bucket.
+  for (let i = 0; i < 60; i++) {
+    const allowed = await post(`spoof-${i},203.0.113.9,34.120.0.1`);
+    assert.equal(allowed.status, 400, "requests within the window reach the handler");
+  }
+  const limited = await post("spoof-final,203.0.113.9,34.120.0.1");
+  assert.equal(limited.status, 429);
+
+  const otherClient = await post("spoof-x,203.0.113.10,34.120.0.1");
+  assert.equal(otherClient.status, 400, "a different client keeps its own allowance");
+});
+
+test("session-authorized removal needs no wallet signatures", async () => {
+  const app = createEnclaveServer({
+    env: {
+      SIXFIGS_MOCK_ATTESTATION: "1",
+      SIXFIGS_DEV_INSECURE_BALANCES: "1",
+      SIXFIGS_ESCROW_KEY: "22".repeat(32),
+      NODE_ENV: "test",
+    } as NodeJS.ProcessEnv,
+    attestation: new MockAttestationProvider({}),
+    pricing: new StaticPricing({}, 3000),
+    port: 0,
+  });
+  const { port } = await app.listen();
+  after(() => app.server.close());
+  const enclaveUrl = `http://127.0.0.1:${port}`;
+
+  const client = new RegistrationClient({
+    enclaveUrl,
+    policy: { allowMock: true },
+    fetchImpl: fetch,
+  });
+  const alice = evmAccount();
+  const bob = evmAccount();
+  const wallets = [
+    { family: "evm" as const, chainId: 1, address: alice.address },
+    { family: "evm" as const, chainId: 1, address: bob.address },
+  ];
+  const keys = new Map([
+    [alice.address.toLowerCase(), alice.privateKey],
+    [bob.address.toLowerCase(), bob.privateKey],
+  ]);
+  const prepared = client.prepare({ wallets });
+  const signed = await client.submit({ prepared, signatures: signAll(prepared, keys) });
+  const [aliceEntry, bobEntry] = signed.body.walletNullifiers;
+
+  const hello = await client.hello();
+  const escrowBlob = await encryptEscrowBlob(hello.escrowPublicKey, wallets);
+
+  const removal = new RemovalClient({ enclaveUrl, policy: { allowMock: true }, fetchImpl: fetch });
+  const nonce = "backend-removal-1234";
+  const removed = await removal.remove({
+    escrowBlob,
+    identityNullifier: signed.body.identityNullifier,
+    removeWalletNullifiers: [bobEntry!.walletNullifier],
+    nonce,
+  });
+  assert.equal(removed.body.walletNullifiers.length, 1);
+  assert.equal(removed.body.walletNullifiers[0]!.walletNullifier, aliceEntry!.walletNullifier);
+  assert.deepEqual(
+    removed.body.removedWalletNullifiers?.map((entry) => entry.walletNullifier),
+    [bobEntry!.walletNullifier],
+  );
+  assert.equal(removed.body.previousIdentityNullifier, signed.body.identityNullifier);
+  assert.notEqual(removed.body.identityNullifier, signed.body.identityNullifier);
+  assert.ok(removed.body.nextEscrowBlob);
+
+  const verifier = new AttestationVerifier({
+    audience: "6figs-registration",
+    allowMock: true,
+    policy: {
+      allowedImageDigests: [],
+      allowedProjects: [],
+      allowedNullifierSchemes: ["legacy-v1"],
+    },
+  });
+  const body = await verifier.verifyRegistration(removed, { expectedNonce: nonce });
+  assert.equal(body.identityNullifier, removed.body.identityNullifier);
+
+  // The rotated blob rechecks under the new commitment.
+  const recheck = new RecheckClient({ enclaveUrl, policy: { allowMock: true }, fetchImpl: fetch });
+  const rechecked = await recheck.recheck({
+    escrowBlob: removed.body.nextEscrowBlob!,
+    identityNullifier: removed.body.identityNullifier,
+    nonce: "backend-recheck-after-removal",
+  });
+  assert.equal(rechecked.body.identityNullifier, removed.body.identityNullifier);
+  assert.equal(rechecked.body.walletNullifiers.length, 1);
+
+  const failure = (input: Parameters<RemovalClient["remove"]>[0]) =>
+    removal.remove(input).then(
+      () => null,
+      (error: unknown) => error as { code?: string },
+    );
+  assert.equal(
+    (await failure({
+      escrowBlob,
+      identityNullifier: "0".repeat(64),
+      removeWalletNullifiers: [aliceEntry!.walletNullifier],
+      nonce: "backend-removal-0002",
+    }))?.code,
+    "identity_mismatch",
+  );
+  assert.equal(
+    (await failure({
+      escrowBlob,
+      identityNullifier: signed.body.identityNullifier,
+      removeWalletNullifiers: ["f".repeat(64)],
+      nonce: "backend-removal-0003",
+    }))?.code,
+    "unknown_wallet",
+  );
+  assert.equal(
+    (await failure({
+      escrowBlob,
+      identityNullifier: signed.body.identityNullifier,
+      removeWalletNullifiers: [aliceEntry!.walletNullifier, bobEntry!.walletNullifier],
+      nonce: "backend-removal-0004",
+    }))?.code,
+    "bad_request",
+  );
 });
 
 test("recheck is refused without persistent escrow material", async () => {

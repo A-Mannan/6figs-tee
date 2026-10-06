@@ -96,12 +96,14 @@ Read `docs/ATTESTATION.md` for the exact nonce and claim mechanics.
   recovery is re-signing with the same wallets.
 - Membership changes are asymmetric. Growth: only the added wallet signs a
   compact consent, authorized by the email session plus proof of control.
-  Removal: every kept wallet signs one threshold challenge naming the removed
-  wallet(s); the removed wallet signs nothing, so a lost wallet can be evicted
-  by N−1 cooperating wallets. The backend infers the previous account from
-  stored bindings, never from a client claim, and rejects silent growth or
-  shrinkage. Additions and removals carry previous identity, changed set, and
-  a fresh escrow blob as a signed triple.
+  Removal: the email session authorizes it; the backend sends the stored escrow
+  blob and the target wallet nullifiers to the enclave, which removes them and
+  signs a fresh transition plus escrow blob. No wallet signatures, so a lost
+  wallet is removable without it. The enclave refuses a blob/commitment
+  mismatch and the backend infers the previous account from stored bindings,
+  never from a client claim, rejecting silent growth or shrinkage. Additions
+  and removals carry previous identity, changed set, and a fresh escrow blob as
+  a signed triple.
 - Verification fails closed. Any failed check throws; nothing is "accepted with
   a warning."
 

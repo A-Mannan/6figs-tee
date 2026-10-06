@@ -83,7 +83,9 @@ metadata. When `SIXFIGS_ESCROW_KEY` is set it also sets
 `NODE_ENV=production` and otherwise refuses the environment key. To exercise
 the KMS path instead, set `SIXFIGS_KMS_KEY`, `SIXFIGS_KMS_WRAPPED_ESCROW_KEY`,
 and `SIXFIGS_KMS_STS_AUDIENCE` (optional `SIXFIGS_KMS_SERVICE_ACCOUNT`); the
-dev image allowlist forwards them. Required in `.env.dev`:
+dev image allowlist forwards them. Add `SIXFIGS_KMS_WRAPPED_NULLIFIER_KEY` to
+release the nullifier key the same way, removing both secrets from the VM
+environment. Required in `.env.dev`:
 
 ```
 SIXFIGS_RPC_SOLANA=https://api.devnet.solana.com
@@ -92,6 +94,12 @@ SIXFIGS_NULLIFIER_KEY=<openssl rand -hex 32>
 SIXFIGS_ESCROW_KEY=<openssl rand -hex 32>   # persistent; keep it across VM recreations
 SIXFIGS_ALLOWED_ORIGIN=http://localhost:3000
 ```
+
+`SIXFIGS_ALLOWED_ORIGIN=*` is honored for testing when the frontend origin
+rotates (Netlify previews). When the dev VM is put behind the GCP HTTPS load
+balancer, add `SIXFIGS_TRUST_PROXY=1` and restrict the firewall to the GFE
+ranges (`130.211.0.0/22`, `35.191.0.0/16`) so rate limiting still sees real
+clients.
 
 The nullifier and escrow keys are dev keys. They are visible in VM metadata to
 anyone with `compute.instances.get`; never reuse them and never treat dev

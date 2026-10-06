@@ -11,15 +11,25 @@ export const LEGACY_NULLIFIER_SCHEME = {
 };
 /**
  * Keyed scheme. The separate v2 domain tag keeps the two formulas from ever
- * colliding, even if the key leaks.
+ * colliding, even if the key leaks. Constructed without a key when boot-time
+ * KMS unwrap is configured; hashing before the key arrives throws.
  */
 export function keyedNullifierScheme(key) {
-    const keyCopy = key.slice();
+    let material = key ? key.slice() : null;
     return {
         name: "keyed-v1",
+        get pending() {
+            return material === null;
+        },
+        setKey(next) {
+            material = next.slice();
+        },
         walletNullifier(family, address) {
+            if (material === null) {
+                throw new Error("nullifier key has not been loaded");
+            }
             const normalized = family === "evm" ? address.toLowerCase() : address;
-            return hmacSha256Hex(keyCopy, `${DOMAIN.walletV2}|${family}|${normalized}`);
+            return hmacSha256Hex(material, `${DOMAIN.walletV2}|${family}|${normalized}`);
         },
     };
 }

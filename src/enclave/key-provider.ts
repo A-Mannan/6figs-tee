@@ -3,26 +3,30 @@ import type { AttestationProvider } from "./attestation-provider.ts";
 
 export type EscrowKeyProviderKind = "kms" | "env" | "none";
 
-export interface LoadedEscrowKey {
+export interface LoadedSecrets {
   /** null when no persistent material is configured (provider "none"). */
-  privateKey: Uint8Array | null;
+  escrowPrivateKey: Uint8Array | null;
+  /** Present only when a wrapped nullifier key is configured and released. */
+  nullifierKey?: Uint8Array;
   provider: EscrowKeyProviderKind;
-  /** KMS key resource that released the key, when applicable. */
+  /** KMS key resource that released the keys, when applicable. */
   keyId?: string;
 }
 
 /**
- * Owns how the long-lived escrow private key enters the enclave. The key is
- * only ever a raw 32-byte X25519 scalar; providers differ in who can release
- * it. Rechecks and wallet additions need persistent material; without it they
- * fail closed.
+ * Owns how the long-lived secrets enter the enclave: the escrow private key
+ * (64-hex X25519 scalar) and, when configured, the nullifier HMAC key.
+ * Providers differ in who can release them; both are raw 32-byte values.
+ * Rechecks and wallet additions need persistent escrow material; without it
+ * they fail closed.
  */
 export interface EscrowKeyProvider {
   readonly kind: EscrowKeyProviderKind;
-  load(): Promise<LoadedEscrowKey>;
+  load(): Promise<LoadedSecrets>;
 }
 
 const ESCROW_KEY_BYTES = 32;
+const NULLIFIER_KEY_BYTES = 32;
 
 export class EnvEscrowKeyProvider implements EscrowKeyProvider {
   readonly kind = "env" as const;
@@ -32,19 +36,19 @@ export class EnvEscrowKeyProvider implements EscrowKeyProvider {
     this.raw = raw;
   }
 
-  async load(): Promise<LoadedEscrowKey> {
+  async load(): Promise<LoadedSecrets> {
     if (!/^[0-9a-fA-F]{64}$/.test(this.raw)) {
       throw new Error("SIXFIGS_ESCROW_KEY must be 64 hex characters (32 bytes)");
     }
-    return { privateKey: hexToBytes(this.raw), provider: "env" };
+    return { escrowPrivateKey: hexToBytes(this.raw), provider: "env" };
   }
 }
 
 export class NoneEscrowKeyProvider implements EscrowKeyProvider {
   readonly kind = "none" as const;
 
-  async load(): Promise<LoadedEscrowKey> {
-    return { privateKey: null, provider: "none" };
+  async load(): Promise<LoadedSecrets> {
+    return { escrowPrivateKey: null, provider: "none" };
   }
 }
 
@@ -53,6 +57,8 @@ export interface GcpKmsEscrowKeyProviderOptions {
   kmsKey: string;
   /** Ciphertext of the 32-byte escrow private key, base64 (standard). */
   wrappedKey: Uint8Array;
+  /** Optional ciphertext of the 32-byte nullifier HMAC key. */
+  wrappedNullifierKey?: Uint8Array;
   /** Workload identity audience: //iam.googleapis.com/projects/N/locations/global/workloadIdentityPools/P/providers/PR. */
   stsAudience: string;
   /** Service account to impersonate after federation, when required. */
@@ -87,7 +93,7 @@ export class GcpKmsEscrowKeyProvider implements EscrowKeyProvider {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
-  async load(): Promise<LoadedEscrowKey> {
+  async load(): Promise<LoadedSecrets> {
     const attestationToken = await this.options.attestation.getToken({
       audience: this.options.attestationAudience ?? this.options.stsAudience,
       nonces: [],
@@ -99,13 +105,27 @@ export class GcpKmsEscrowKeyProvider implements EscrowKeyProvider {
       ? await this.impersonate(federated, this.options.serviceAccount)
       : federated;
 
-    const plaintext = await this.decrypt(accessToken);
-    if (plaintext.length !== ESCROW_KEY_BYTES) {
+    const escrowKey = await this.decrypt(accessToken, this.options.wrappedKey);
+    if (escrowKey.length !== ESCROW_KEY_BYTES) {
       throw new Error(
-        `KMS released ${plaintext.length} bytes; the escrow key must be ${ESCROW_KEY_BYTES}`,
+        `KMS released ${escrowKey.length} bytes; the escrow key must be ${ESCROW_KEY_BYTES}`,
       );
     }
-    return { privateKey: plaintext, provider: "kms", keyId: this.options.kmsKey };
+    const loaded: LoadedSecrets = {
+      escrowPrivateKey: escrowKey,
+      provider: "kms",
+      keyId: this.options.kmsKey,
+    };
+    if (this.options.wrappedNullifierKey) {
+      const nullifierKey = await this.decrypt(accessToken, this.options.wrappedNullifierKey);
+      if (nullifierKey.length !== NULLIFIER_KEY_BYTES) {
+        throw new Error(
+          `KMS released ${nullifierKey.length} bytes; the nullifier key must be ${NULLIFIER_KEY_BYTES}`,
+        );
+      }
+      loaded.nullifierKey = nullifierKey;
+    }
+    return loaded;
   }
 
   private async exchange(subjectToken: string): Promise<string> {
@@ -154,7 +174,7 @@ export class GcpKmsEscrowKeyProvider implements EscrowKeyProvider {
     return parsed.accessToken;
   }
 
-  private async decrypt(accessToken: string): Promise<Uint8Array> {
+  private async decrypt(accessToken: string, wrapped: Uint8Array): Promise<Uint8Array> {
     const response = await this.fetchImpl(`${KMS_ENDPOINT}/${this.options.kmsKey}:decrypt`, {
       method: "POST",
       headers: {
@@ -162,7 +182,7 @@ export class GcpKmsEscrowKeyProvider implements EscrowKeyProvider {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        ciphertext: Buffer.from(this.options.wrappedKey).toString("base64"),
+        ciphertext: Buffer.from(wrapped).toString("base64"),
         ...(this.options.additionalAuthenticatedData
           ? {
               additionalAuthenticatedData: Buffer.from(
@@ -210,9 +230,13 @@ export function selectEscrowKeyProvider(
     const serviceAccount = (env.SIXFIGS_KMS_SERVICE_ACCOUNT ?? "").trim();
     const attestationAudience = (env.SIXFIGS_KMS_ATTESTATION_AUDIENCE ?? "").trim();
     const aad = env.SIXFIGS_KMS_AAD;
+    const wrappedNullifier = (env.SIXFIGS_KMS_WRAPPED_NULLIFIER_KEY ?? "").trim();
     return new GcpKmsEscrowKeyProvider({
       kmsKey,
       wrappedKey: new Uint8Array(Buffer.from(wrapped, "base64")),
+      ...(wrappedNullifier
+        ? { wrappedNullifierKey: new Uint8Array(Buffer.from(wrappedNullifier, "base64")) }
+        : {}),
       stsAudience,
       ...(serviceAccount ? { serviceAccount } : {}),
       ...(attestationAudience ? { attestationAudience } : {}),

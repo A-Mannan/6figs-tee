@@ -100,7 +100,7 @@ establishment still requires every wallet.
 | 8 | Dictionary attack: compute the nullifier for public whale addresses and match stored nullifiers | **Partially mitigated** | Keyed nullifiers need the enclave key, so a leaked registry resists offline matching. Legacy rows remain confirmable; rotate to `keyed-v1` and retire them. Keep registration write-only and authenticated regardless. A blind OPRF was considered and dropped; keyed HMAC is the accepted scheme. |
 | 9 | Losing the identity secret | **Eliminated** | Secret removed; wallet set is the account. |
 | 10 | Backend-issued IDs / JWTs as the root of identity | Rejected | They make the backend the credential authority and leave it holding a replayable bearer token. Nothing signed or hashed is delegated to the backend. |
-| 11 | Partial wallet compromise adds or removes wallets | Accepted, bounded | Additions need only the added wallet's signature plus the authenticated session; removals need every kept wallet. N−1 cooperating wallets can evict the Nth — the deliberate trade that lets a lost wallet be removed. The backend enforces exact set equality against its stored bindings and the enclave re-derives the base identity from the escrow blob. |
+| 11 | Partial wallet compromise adds or removes wallets | Accepted, bounded | Additions need only the added wallet's signature plus the authenticated session. Removals need no wallet signatures: the session authorizes the backend, which presents the stored escrow blob and target nullifiers to the enclave. A stolen session or a compromised backend can therefore evict wallets (denial, not theft; the owner can re-add), which is the deliberate trade for one-click removal and lost-wallet recovery. The backend enforces exact set equality against its stored bindings and the enclave re-derives the base identity from the escrow blob. |
 | 12 | Merging two accounts' wallets | Rejected | Set spanning two owners is a conflict; DB unique constraint is the backstop. |
 | 13 | A wallet is enrolled by two identities | Rejected | `wallet_nullifier` primary key + `bindWallets` conflict check. |
 | 14 | Unknown token-inflation (airdrop a fake token, hope it is valued) | Mitigated | No allowlist, but every asset needs a real price API quote, prices are overflow-checked, and dollar-range assets are capped. Residual risk needs liquidity/volume gates or a signed price feed. |
@@ -110,6 +110,7 @@ establishment still requires every wallet.
 | 18 | Timing / metadata correlation of registrations | Accepted | The wallet set is a stable pseudonym by design; there is no per-epoch rotation to hide behind. |
 | 19 | Envelope replay within the freshness window | Mitigated | The enclave caches processed nonces and rejects replays (`replay_detected`), checked after the concurrency gate so overload refusals never burn a nonce. |
 | 20 | Internal error text in 500 responses | Fixed | Unexpected failures return a fixed generic message; client-caused errors keep their codes. |
+| 21 | Client spoofs `X-Forwarded-For` behind the load balancer to evade the rate limit | Mitigated | Trusted-proxy mode (`SIXFIGS_TRUST_PROXY=1`) reads only the client IP the GCP load balancer appends (second-to-last entry), validates it with `net.isIP`, and ignores client-supplied prefixes; anything malformed falls back to the socket peer. Correct only when the firewall admits `:8080` solely from the GFE ranges. |
 
 ## Known leaks and mitigations
 
@@ -123,14 +124,14 @@ addresses. Mitigations, in rough order of effort:
   Solana node, eliminating the third-party RPC entirely.
 - Egress through distinct IPs per provider.
 
-**2. Confirmable wallet nullifier.** The deployed fix is keyed derivation:
-with `SIXFIGS_NULLIFIER_KEY` provisioned, nullifiers are
+**2. Confirmable wallet nullifier.** Keyed derivation:
 `HMAC(key, "6figs-wallet-v2"|family|address)`, so a leaked registry resists
-offline matching without the key. Remaining gaps: the key lives in the
-enclave's environment rather than KMS, and legacy rows stay confirmable until
-retired. The stronger fix is a blind OPRF: the enclave holds a KMS key and
-evaluates it obliviously, so the client cannot learn the input-output mapping.
-Until either lands, treat the registry as write-only from the outside.
+offline matching without the key. The key can be released only to the attested
+image through the same KMS and workload-identity path as the escrow key
+(`SIXFIGS_KMS_WRAPPED_NULLIFIER_KEY`), keeping it out of VM metadata; the
+environment key remains a dev/staging fallback. Remaining gap: legacy rows stay
+confirmable until retired. The blind OPRF was dropped; treat the registry as
+write-only from the outside regardless.
 
 **3. Price-source manipulation.** A price source could be wrong or
 manipulated. Quotes fall back across CoinGecko, GeckoTerminal, and DexScreener
@@ -211,8 +212,16 @@ The curated `TOKEN_SEEDS` list was deleted. Consequences and replacement rules:
   `SIXFIGS_ESCROW_KEY` environment path unless
   `SIXFIGS_ALLOW_ENV_ESCROW_KEY=1`, so the "only the enclave can decrypt"
   claim is enforced by the KMS IAM policy rather than by the environment.
-- Threshold wallet removal SHIPPED: every kept wallet signs, the removed (lost)
-  wallet signs nothing, and the backend enforces exact set equality.
+- KMS-bound nullifier key SHIPPED: with
+  `SIXFIGS_KMS_WRAPPED_NULLIFIER_KEY` configured, the nullifier HMAC key is
+  unwrapped through the same attested exchange and no nullifier key is read
+  from the environment. Boot fails closed if the unwrap does not deliver it.
+- Session-authorized wallet removal SHIPPED: the email session authorizes the
+  backend, which presents the stored escrow blob and the target wallet
+  nullifiers to `/removal`; the enclave removes them, re-encrypts the escrow
+  blob, and signs the same transition body, with the backend enforcing exact
+  set equality. The threshold path (every kept wallet signs) remains in the
+  enclave but is no longer used by the product flow.
 - Multi-source pricing SHIPPED: CoinGecko → GeckoTerminal → DexScreener by
   contract address. Oracle feeds are deliberately not used (coverage).
 - Blind OPRF nullifiers DROPPED: the keyed-HMAC scheme stays; a registry leak

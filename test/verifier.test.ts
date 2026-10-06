@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { bytesToBase64url, canonicalJson, randomBytes, sha256Hex, utf8 } from "../src/shared/crypto.ts";
 import { bindingNonce, exportPublicKeys, signResult } from "../src/shared/attestation.ts";
 import { DOMAIN } from "../src/shared/constants.ts";
-import { walletSetNullifier } from "../src/shared/nullifiers.ts";
+import { LEGACY_NULLIFIER_SCHEME, walletSetNullifier } from "../src/shared/nullifiers.ts";
 import { MockAttestationProvider } from "../src/enclave/attestation-provider.ts";
 import { EnclaveKeyManager } from "../src/enclave/keys.ts";
 import {
@@ -30,7 +30,7 @@ async function makeSigned(overrides: Partial<RegistrationResultBody> = {}): Prom
   canonical: string;
 }> {
   const attestation = new MockAttestationProvider({});
-  const manager = new EnclaveKeyManager(attestation, "legacy-v1", {});
+  const manager = new EnclaveKeyManager(attestation, LEGACY_NULLIFIER_SCHEME, {});
   const keys = manager.keys;
   const { signingPublicKey, keyId } = exportPublicKeys(keys);
 
@@ -574,7 +574,7 @@ test("registration service rejects a set spanning two identities", async () => {
 
 test("verifier hello binds the enclosure key", async () => {
   const attestation = new MockAttestationProvider({});
-  const manager = new EnclaveKeyManager(attestation, "legacy-v1", {});
+  const manager = new EnclaveKeyManager(attestation, LEGACY_NULLIFIER_SCHEME, {});
   const hello = await manager.hello("test-policy");
   await verifier().verifyHello(hello);
   hello.keyId = "00".repeat(32);
@@ -583,7 +583,7 @@ test("verifier hello binds the enclosure key", async () => {
 
 test("verifier hello rejects a substituted encryption key", async () => {
   const attestation = new MockAttestationProvider({});
-  const manager = new EnclaveKeyManager(attestation, "legacy-v1", {});
+  const manager = new EnclaveKeyManager(attestation, LEGACY_NULLIFIER_SCHEME, {});
   const hello = await manager.hello("test-policy");
   hello.encryptionPublicKey = bytesToBase64url(randomBytes(32));
   await assert.rejects(() => verifier().verifyHello(hello));
@@ -591,7 +591,7 @@ test("verifier hello rejects a substituted encryption key", async () => {
 
 test("verifier hello rejects a substituted escrow key", async () => {
   const attestation = new MockAttestationProvider({});
-  const manager = new EnclaveKeyManager(attestation, "legacy-v1", {});
+  const manager = new EnclaveKeyManager(attestation, LEGACY_NULLIFIER_SCHEME, {});
   const hello = await manager.hello("test-policy");
   hello.escrowPublicKey = bytesToBase64url(randomBytes(32));
   await assert.rejects(() => verifier().verifyHello(hello));

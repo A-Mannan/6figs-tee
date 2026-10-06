@@ -1,7 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { POLICY_VERSION } from "../shared/constants.ts";
 import { decryptEnvelope } from "../shared/envelope.ts";
-import type { EnvelopePayload, RecheckPayload, SignedEnvelope } from "../shared/types.ts";
+import type {
+  EnvelopePayload,
+  RecheckPayload,
+  SessionRemovalPayload,
+  SignedEnvelope,
+} from "../shared/types.ts";
 import {
   ConfidentialSpaceAttestationProvider,
   MockAttestationProvider,
@@ -9,7 +14,12 @@ import {
 } from "./attestation-provider.ts";
 import { EnclaveKeyManager } from "./keys.ts";
 import type { EscrowKeyProvider } from "./key-provider.ts";
-import { ConcurrencyGate, FixedWindowRateLimiter, SeenNonces } from "./limits.ts";
+import {
+  clientAddress,
+  ConcurrencyGate,
+  FixedWindowRateLimiter,
+  SeenNonces,
+} from "./limits.ts";
 import {
   keyedNullifierScheme,
   LEGACY_NULLIFIER_SCHEME,
@@ -23,7 +33,12 @@ import {
   StaticPricing,
   type PricingProvider,
 } from "./pricing.ts";
-import { recheckPortfolio, registerPortfolio, RegistrationError } from "./registration.ts";
+import {
+  recheckPortfolio,
+  registerPortfolio,
+  removePortfolio,
+  RegistrationError,
+} from "./registration.ts";
 
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_CONCURRENT_REGISTRATIONS = 4;
@@ -76,15 +91,19 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
   const nullifier = selectNullifierScheme(env);
   const keyManager = new EnclaveKeyManager(
     attestation,
-    nullifier.name,
+    nullifier,
     env,
     options.escrowKeyProvider,
   );
   const seenNonces = new SeenNonces();
   const gate = new ConcurrencyGate(MAX_CONCURRENT_REGISTRATIONS);
   const limiter = new FixedWindowRateLimiter(MAX_REGISTRATIONS_PER_MINUTE, 60_000);
-  // No wildcard fallback: when unset, no cross-origin headers are emitted.
+  // No wildcard fallback: when unset, no cross-origin headers are emitted. An
+  // explicit `*` is honored for testing; production pins the exact origin.
   const allowedOrigin = env.SIXFIGS_ALLOWED_ORIGIN ?? null;
+  // Only valid when the firewall restricts :8080 to the load balancer's GFE
+  // ranges; see clientAddress for the X-Forwarded-For trust rules.
+  const trustProxy = env.SIXFIGS_TRUST_PROXY === "1";
 
   const server = createServer((req, res) => {
     void handle(req, res).catch((error: unknown) => {
@@ -135,6 +154,11 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/removal") {
+      await handleRemoval(req, res);
+      return;
+    }
+
     writeJson(res, 404, { error: "not_found", message: "unknown route" });
   }
 
@@ -142,7 +166,11 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> {
-    const clientIp = req.socket.remoteAddress ?? "unknown";
+    const clientIp = clientAddress(
+      req.socket.remoteAddress,
+      req.headers["x-forwarded-for"],
+      trustProxy,
+    );
     if (!limiter.allow(clientIp)) {
       writeJson(res, 429, {
         error: "rate_limited",
@@ -236,7 +264,11 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
   }
 
   async function handleRecheck(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const clientIp = req.socket.remoteAddress ?? "unknown";
+    const clientIp = clientAddress(
+      req.socket.remoteAddress,
+      req.headers["x-forwarded-for"],
+      trustProxy,
+    );
     if (!limiter.allow(clientIp)) {
       writeJson(res, 429, {
         error: "rate_limited",
@@ -322,6 +354,97 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
     }
   }
 
+  async function handleRemoval(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const clientIp = clientAddress(
+      req.socket.remoteAddress,
+      req.headers["x-forwarded-for"],
+      trustProxy,
+    );
+    if (!limiter.allow(clientIp)) {
+      writeJson(res, 429, {
+        error: "rate_limited",
+        message: "too many requests, try again later",
+      });
+      return;
+    }
+    if (!gate.tryEnter()) {
+      writeJson(res, 503, {
+        error: "server_busy",
+        message: "the enclave is at capacity, try again later",
+      });
+      return;
+    }
+    try {
+      await handleRemovalInner(req, res);
+    } finally {
+      gate.leave();
+    }
+  }
+
+  async function handleRemovalInner(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    let bodyText: string;
+    try {
+      bodyText = await readBody(req);
+    } catch (error) {
+      writeJson(res, 413, {
+        error: "payload_too_large",
+        message: error instanceof Error ? error.message : "body too large",
+      });
+      return;
+    }
+
+    let envelope: SignedEnvelope;
+    try {
+      envelope = JSON.parse(bodyText) as SignedEnvelope;
+    } catch {
+      writeJson(res, 400, { error: "bad_json", message: "body is not valid JSON" });
+      return;
+    }
+
+    let payload: SessionRemovalPayload;
+    try {
+      payload = await decryptEnvelope<SessionRemovalPayload>(
+        keyManager.keys.encryptionPrivate,
+        envelope,
+      );
+    } catch {
+      writeJson(res, 400, {
+        error: "decrypt_failed",
+        message: "could not decrypt request envelope",
+      });
+      return;
+    }
+
+    try {
+      if (typeof payload.nonce !== "string" || seenNonces.seen(payload.nonce)) {
+        writeJson(res, 400, {
+          error: "replay_detected",
+          message: "this request was already processed",
+        });
+        return;
+      }
+      const signed = await removePortfolio(payload, {
+        keys: keyManager.keys,
+        attestation,
+        pricing,
+        nullifier,
+        env,
+        escrowPersistent: keyManager.escrowPersistent,
+      });
+      writeJson(res, 200, signed);
+    } catch (error) {
+      if (error instanceof RegistrationError) {
+        if (error.code === "budget_exceeded") {
+          writeJson(res, 503, { error: error.code, message: error.message });
+          return;
+        }
+        writeJson(res, 400, { error: error.code, message: error.message });
+        return;
+      }
+      throw error;
+    }
+  }
+
   return {
     server,
     keyManager,
@@ -347,10 +470,15 @@ export function createEnclaveServer(options: EnclaveServerOptions = {}) {
 
 /**
  * The nullifier scheme is a privacy decision, not just configuration: without
- * a key, wallet nullifiers are computable offline by anyone. Production
- * refuses to boot keyless so the guarantee cannot silently degrade.
+ * a key, wallet nullifiers are computable offline by anyone. A KMS-wrapped key
+ * is released at boot through the provider; the environment key is the
+ * dev/staging fallback; production refuses to boot keyless so the guarantee
+ * cannot silently degrade.
  */
-function selectNullifierScheme(env: NodeJS.ProcessEnv): NullifierScheme {
+export function selectNullifierScheme(env: NodeJS.ProcessEnv): NullifierScheme {
+  if ((env.SIXFIGS_KMS_WRAPPED_NULLIFIER_KEY ?? "").trim() !== "") {
+    return keyedNullifierScheme();
+  }
   const raw = env.SIXFIGS_NULLIFIER_KEY;
   if (raw !== undefined && raw !== "") {
     if (!/^[0-9a-fA-F]{64}$/.test(raw)) {

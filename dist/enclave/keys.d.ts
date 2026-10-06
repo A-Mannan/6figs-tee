@@ -1,5 +1,5 @@
 import { exportPublicKeys, type EnclaveKeys } from "../shared/attestation.ts";
-import type { NullifierSchemeName } from "../shared/nullifiers.ts";
+import type { NullifierScheme } from "../shared/nullifiers.ts";
 import type { EnclaveHello } from "../shared/types.ts";
 import type { AttestationProvider } from "./attestation-provider.ts";
 import { type EscrowKeyProvider, type EscrowKeyProviderKind } from "./key-provider.ts";
@@ -13,21 +13,22 @@ import { type EscrowKeyProvider, type EscrowKeyProviderKind } from "./key-provid
  */
 export declare class EnclaveKeyManager {
     readonly keys: EnclaveKeys;
-    readonly nullifierScheme: NullifierSchemeName;
+    readonly nullifierScheme: NullifierScheme;
     readonly provider: EscrowKeyProvider;
-    private loadedEscrow;
+    private loadedSecrets;
     private loadPromise;
     private helloCache;
+    private helloCacheAt;
     private readonly attestation;
-    constructor(attestation: AttestationProvider, nullifierScheme: NullifierSchemeName, env?: NodeJS.ProcessEnv, provider?: EscrowKeyProvider);
+    constructor(attestation: AttestationProvider, nullifierScheme: NullifierScheme, env?: NodeJS.ProcessEnv, provider?: EscrowKeyProvider);
     get publicKeys(): ReturnType<typeof exportPublicKeys>;
     get escrowPersistent(): boolean;
     get escrowKeyProvider(): EscrowKeyProviderKind;
     get escrowKeyId(): string | undefined;
     /**
-     * Resolve the escrow key exactly once. A failure is sticky and must prevent
-     * the server from listening: a KMS-configured enclave that cannot unwrap its
-     * key is not allowed to answer with a key it does not hold.
+     * Resolve the persistent secrets exactly once. A failure is sticky and must
+     * prevent the server from listening: a KMS-configured enclave that cannot
+     * unwrap its keys is not allowed to answer with keys it does not hold.
      */
     ensureEscrowLoaded(): Promise<void>;
     hello(policyVersion: string): Promise<EnclaveHello>;

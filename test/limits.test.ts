@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ConcurrencyGate, FixedWindowRateLimiter, SeenNonces } from "../src/enclave/limits.ts";
+import {
+  clientAddress,
+  ConcurrencyGate,
+  FixedWindowRateLimiter,
+  SeenNonces,
+} from "../src/enclave/limits.ts";
 
 test("rate limiter allows up to the limit, then rejects", () => {
   let now = 1_000;
@@ -39,6 +44,39 @@ test("seen nonces reject replays within the window and expire after", () => {
   assert.equal(seen.seen("n2"), false);
   now += 60_000;
   assert.equal(seen.seen("n1"), false);
+});
+
+test("client address is the socket peer unless proxy trust is enabled", () => {
+  assert.equal(clientAddress("10.0.0.7", "203.0.113.9,34.120.0.1", false), "10.0.0.7");
+  assert.equal(clientAddress(undefined, undefined, true), "unknown");
+});
+
+test("client address is the load-balancer-appended client IP", () => {
+  assert.equal(
+    clientAddress("10.0.0.7", "203.0.113.9,34.120.0.1", true),
+    "203.0.113.9",
+  );
+  assert.equal(
+    clientAddress("10.0.0.7", "2001:db8::1,2600:1901::1", true),
+    "2001:db8::1",
+  );
+});
+
+test("client-supplied forwarded values cannot rotate the rate-limit key", () => {
+  assert.equal(
+    clientAddress("10.0.0.7", "spoofed,203.0.113.9, 34.120.0.1 ", true),
+    "203.0.113.9",
+  );
+  assert.equal(
+    clientAddress("10.0.0.7", ["spoofed", "203.0.113.9", "34.120.0.1"], true),
+    "203.0.113.9",
+  );
+});
+
+test("missing or malformed forwarded headers fall back to the socket peer", () => {
+  assert.equal(clientAddress("10.0.0.7", "203.0.113.9", true), "10.0.0.7");
+  assert.equal(clientAddress("10.0.0.7", "not-an-ip,34.120.0.1", true), "10.0.0.7");
+  assert.equal(clientAddress("10.0.0.7", "", true), "10.0.0.7");
 });
 
 test("concurrency gate admits up to its capacity and resets", () => {

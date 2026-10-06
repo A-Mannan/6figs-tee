@@ -9,15 +9,20 @@ export type NullifierSchemeName = "legacy-v1" | "keyed-v1";
 export interface NullifierScheme {
     readonly name: NullifierSchemeName;
     walletNullifier(family: string, address: string): string;
+    /** True while a keyed scheme waits for key material from the boot provider. */
+    readonly pending?: boolean;
+    /** Delivers key material to a pending keyed scheme; never called on legacy. */
+    setKey?(key: Uint8Array): void;
 }
 /** wallet_nullifier = SHA-256(domain || family || normalizedAddress). One-way. */
 export declare function walletNullifier(family: string, address: string): string;
 export declare const LEGACY_NULLIFIER_SCHEME: NullifierScheme;
 /**
  * Keyed scheme. The separate v2 domain tag keeps the two formulas from ever
- * colliding, even if the key leaks.
+ * colliding, even if the key leaks. Constructed without a key when boot-time
+ * KMS unwrap is configured; hashing before the key arrives throws.
  */
-export declare function keyedNullifierScheme(key: Uint8Array): NullifierScheme;
+export declare function keyedNullifierScheme(key?: Uint8Array): NullifierScheme;
 /**
  * identity_nullifier = SHA-256(domain || sorted family:walletNullifier list).
  * The account *is* the wallet set: no client-held secret exists, so recovery is

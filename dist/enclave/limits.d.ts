@@ -3,6 +3,15 @@
  * damage one client can do to provider quotas and the event loop; they are not
  * a substitute for load-balancer rate limiting.
  */
+/**
+ * Rate-limit key for a request. Behind the GCP external Application Load
+ * Balancer the socket peer is the GFE, and the client address is the
+ * second-to-last `X-Forwarded-For` entry: the balancer appends
+ * `<client-ip>,<load-balancer-ip>` after any client-supplied values, which are
+ * never trusted. Absent or malformed input falls back to the socket peer, so
+ * failures share a bucket instead of evading the limit.
+ */
+export declare function clientAddress(remoteAddress: string | undefined, forwardedFor: string | string[] | undefined, trustProxy: boolean): string;
 /** Fixed-window per-key limiter. Windows are pruned once the map grows. */
 export declare class FixedWindowRateLimiter {
     private readonly hits;

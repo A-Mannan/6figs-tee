@@ -436,6 +436,97 @@ export async function recheckPortfolio(payload, deps) {
     };
     return signBody(body, deps);
 }
+/**
+ * Session-authorized removal: the backend holds the escrow blob and asks the
+ * enclave to detach wallets by their stored nullifiers. No wallet signatures:
+ * blob possession plus a fresh single-use nonce is the capability. The result
+ * carries the same transition fields as the threshold path, so verification is
+ * unchanged; the backend enforces that the session owns the account and that
+ * the new set is exactly the stored set minus the targets.
+ */
+export async function removePortfolio(payload, deps) {
+    const env = deps.env ?? process.env;
+    if (!deps.escrowPersistent) {
+        throw new RegistrationError("escrow_unavailable", "escrow key is not persistent; removals are disabled");
+    }
+    validateSessionRemovalShape(payload);
+    const now = Date.now();
+    if (Math.abs(now - payload.timestamp) > REQUEST_MAX_AGE_MS) {
+        throw new RegistrationError("stale_request", "request timestamp is outside the freshness window");
+    }
+    const deadline = now + (Number(env.SIXFIGS_REGISTRATION_BUDGET_MS) || DEFAULT_REGISTRATION_BUDGET_MS);
+    const escrow = await decryptEnvelope(deps.keys.escrowPrivate, payload.escrowBlob).catch(() => {
+        throw new RegistrationError("bad_escrow", "escrow blob could not be decrypted");
+    });
+    if (!escrow || escrow.v !== 1 || !Array.isArray(escrow.wallets) || escrow.wallets.length === 0) {
+        throw new RegistrationError("bad_escrow", "escrow payload is malformed");
+    }
+    const stored = withLabels(escrow.wallets);
+    const storedEntries = walletEntriesFromAddresses(stored, deps.nullifier);
+    const baseIdentity = walletSetNullifier(storedEntries);
+    if (baseIdentity !== payload.identityNullifier) {
+        throw new RegistrationError("identity_mismatch", "escrow blob belongs to a different identity");
+    }
+    const targetNullifiers = new Set(payload.removeWalletNullifiers);
+    if (targetNullifiers.size !== payload.removeWalletNullifiers.length) {
+        throw new RegistrationError("duplicate_wallet", "the same wallet was removed twice");
+    }
+    const removedEntries = storedEntries.filter((entry) => targetNullifiers.has(entry.walletNullifier));
+    if (removedEntries.length !== targetNullifiers.size) {
+        throw new RegistrationError("unknown_wallet", "a removed wallet is not enrolled");
+    }
+    const kept = stored.filter((_, index) => !targetNullifiers.has(storedEntries[index].walletNullifier));
+    if (kept.length === 0) {
+        throw new RegistrationError("bad_request", "cannot remove every enrolled wallet");
+    }
+    const keptEntries = walletEntriesFromAddresses(kept, deps.nullifier);
+    assertDistinctNullifiers(keptEntries);
+    let rawBalances;
+    try {
+        rawBalances = await collectBalances(kept, env, deadline, MAX_ASSETS_PER_REQUEST);
+    }
+    catch (error) {
+        if (error instanceof RpcDisagreementError) {
+            throw new RegistrationError("rpc_disagreement", "redundant RPC providers disagree");
+        }
+        throw error;
+    }
+    const valued = await valueBalances(rawBalances, deps.pricing, deadline);
+    const tiers = tiersForEnv(env);
+    const tier = assignTier(valued.totalMicroUsd, tiers);
+    const nextEscrowBlob = await encryptEnvelope(deps.keys.escrowPublic, {
+        v: 1,
+        wallets: kept.map((wallet) => ({
+            family: wallet.family,
+            chainId: wallet.chainId,
+            address: wallet.address,
+            ...(wallet.label ? { label: wallet.label } : {}),
+        })),
+    });
+    const identity = walletSetNullifier(keptEntries);
+    const body = {
+        v: 1,
+        policyVersion: POLICY_VERSION,
+        tier: tier.id,
+        tierLabel: tier.label,
+        tierFloorMicroUsd: tier.minMicroUsd.toString(),
+        nextTierFloorMicroUsd: nextTierFloor(tier.id, tiers).toString(),
+        portfolioBand: portfolioBand(valued.totalMicroUsd, tiers),
+        topAssets: valued.topAssets,
+        disclosure: "hidden",
+        allocation: [],
+        walletNullifiers: keptEntries,
+        removedWalletNullifiers: removedEntries,
+        previousIdentityNullifier: baseIdentity,
+        nextEscrowBlob,
+        identityNullifier: identity,
+        createdAt: now,
+        expiresAt: now + RESULT_TTL_MS,
+        nonce: payload.nonce,
+        nullifierScheme: deps.nullifier.name,
+    };
+    return signBody(body, deps);
+}
 async function signBody(body, deps) {
     const canonicalBody = canonicalJson(body);
     const signature = signResult(deps.keys, canonicalBody);
@@ -507,6 +598,28 @@ function validateRecheckShape(payload) {
     }
     if (!payload.escrowBlob || typeof payload.escrowBlob !== "object") {
         throw new RegistrationError("bad_request", "escrowBlob missing");
+    }
+}
+function validateSessionRemovalShape(payload) {
+    if (!payload || typeof payload !== "object") {
+        throw new RegistrationError("bad_request", "malformed removal payload");
+    }
+    if (typeof payload.nonce !== "string" || payload.nonce.length < 8) {
+        throw new RegistrationError("bad_request", "nonce missing or too short");
+    }
+    if (typeof payload.timestamp !== "number") {
+        throw new RegistrationError("bad_request", "timestamp missing");
+    }
+    if (typeof payload.identityNullifier !== "string" || payload.identityNullifier.length === 0) {
+        throw new RegistrationError("bad_request", "identityNullifier missing");
+    }
+    if (!payload.escrowBlob || typeof payload.escrowBlob !== "object") {
+        throw new RegistrationError("bad_request", "escrowBlob missing");
+    }
+    if (!Array.isArray(payload.removeWalletNullifiers) ||
+        payload.removeWalletNullifiers.length === 0 ||
+        payload.removeWalletNullifiers.some((entry) => typeof entry !== "string" || entry.length === 0)) {
+        throw new RegistrationError("bad_request", "removeWalletNullifiers missing");
     }
 }
 function validateRequestShape(request) {

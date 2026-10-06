@@ -24,3 +24,11 @@ export declare function createEnclaveServer(options?: EnclaveServerOptions): {
         host: string;
     }>;
 };
+/**
+ * The nullifier scheme is a privacy decision, not just configuration: without
+ * a key, wallet nullifiers are computable offline by anyone. A KMS-wrapped key
+ * is released at boot through the provider; the environment key is the
+ * dev/staging fallback; production refuses to boot keyless so the guarantee
+ * cannot silently degrade.
+ */
+export declare function selectNullifierScheme(env: NodeJS.ProcessEnv): NullifierScheme;

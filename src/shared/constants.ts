@@ -55,7 +55,7 @@ export const MAX_WALLET_LABEL = 32;
 export const ALLOCATION_CATEGORIES = ["stable", "majors", "altcoins", "other"] as const;
 export type AllocationCategory = (typeof ALLOCATION_CATEGORIES)[number];
 
-export const POLICY_VERSION = "6figs-tee-2026-10-d";
+export const POLICY_VERSION = "6figs-tee-2026-10-e";
 
 /** Domain-separation tags. Changing any of these breaks all existing nullifiers. */
 export const DOMAIN = {

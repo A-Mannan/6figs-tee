@@ -102,6 +102,22 @@ export interface RecheckPayload {
 }
 
 /**
+ * Backend -> enclave session-authorized removal. The backend proves nothing
+ * beyond holding the escrow blob and a fresh nonce; the account session that
+ * authorizes the backend call is enforced at the backend boundary.
+ */
+export interface SessionRemovalPayload {
+  /** Addresses encrypted to the escrow key; the backend cannot read them. */
+  escrowBlob: SignedEnvelope;
+  /** Commitment the backend believes this blob belongs to; the enclave refuses mismatches. */
+  identityNullifier: string;
+  /** Wallet nullifiers to detach, as stored by the backend. Must be a subset. */
+  removeWalletNullifiers: string[];
+  nonce: string;
+  timestamp: number;
+}
+
+/**
  * The signed result body. It deliberately contains no address and no balance.
  * `allocation` and `walletNullifiers` are only populated when disclosure permits.
  */
