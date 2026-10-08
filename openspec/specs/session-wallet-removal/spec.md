@@ -1,6 +1,12 @@
-# Spec Delta
+# session-wallet-removal Specification
 
-## ADDED Requirements
+## Purpose
+
+Session-authorized wallet removal: the backend, holding the account session and
+the stored escrow blob, asks the enclave to detach a wallet; the enclave returns
+a fresh commitment and escrow blob, and no wallet signatures are required.
+
+## Requirements
 
 ### Requirement: Session-authorized removal endpoint
 

@@ -19,14 +19,18 @@
 
 ## 2. Backend (`tee-hosted`)
 
-- [ ] 2.1 `TeeIdentity` keyed by `userId` with `identityNullifier` as a unique
-  derived column; migration
-- [ ] 2.2 Wallet removal endpoint: session check, `/removal` call, atomic
-  commitment/blob/binding swap, exact set enforcement, `previousIdentityNullifier` check
+- [x] 2.1 `TeeIdentity` keyed by `userId` with `identityNullifier` as a unique
+  derived column; migration (`20261006130000_tee_identity_user_key`); verified
+  by `npm run build`
+- [x] 2.2 Wallet removal endpoint: session check, `/removal` call, atomic
+  commitment/blob/binding swap, exact set enforcement, `previousIdentityNullifier`
+  check (`tee.controller.ts` DELETE `tee-wallet/:walletId`,
+  `tee.service.ts` `removeWallet`); verified by `npm run build`
 
 ## 3. Frontend (`tee-hosted`)
 
-- [ ] 3.1 Registered-wallet list (label + family) with Remove button and
-  confirmation
-- [ ] 3.2 Live address captions for connected wallets from the browser and the
-  local `address → walletNullifier` map; never sent to the backend
+- [x] 3.1 Registered-wallet list (label + family) with Remove button and
+  confirmation (`profile/page.tsx`, `removeTeeWallet`); verified by `npm run build`
+- [x] 3.2 Superseded: live browser address captions were removed by the
+  frontend owner; the wallet list shows family and label only ("ADDRESS HIDDEN
+  BY DESIGN"), and addresses never reach the backend

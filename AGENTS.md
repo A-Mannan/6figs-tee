@@ -58,6 +58,12 @@ POST signed result ────────────────────�
 
 Read `docs/ATTESTATION.md` for the exact nonce and claim mechanics.
 
+Accounts are wallet-first. A proven wallet resolves to its account or creates
+one; optional username + password streamline sign-in on other devices, and a
+forgotten username or password is recovered by proving any enrolled wallet.
+Every wallet flow runs through the enclave, so the backend never sees an
+address; username credentials and sessions live in the app repos.
+
 ## Directory map
 
 | Path | Owns |
@@ -92,11 +98,12 @@ Read `docs/ATTESTATION.md` for the exact nonce and claim mechanics.
   The scheme rides in `/hello` and the signed body and is allowlisted by the
   verifier. Ownership challenges bind the legacy set commitment and list every
   wallet, so the client needs no secret to sign.
-  There is no client-held identity secret: the account *is* the wallet set, and
-  recovery is re-signing with the same wallets.
+  There is no client-held identity secret: the account *is* the wallet set; a
+  single enrolled wallet can sign in and recover access.
 - Membership changes are asymmetric. Growth: only the added wallet signs a
-  compact consent, authorized by the email session plus proof of control.
-  Removal: the email session authorizes it; the backend sends the stored escrow
+  compact consent, authorized by the account session (username/password or any
+  wallet proof) plus proof of control.
+  Removal: the account session authorizes it; the backend sends the stored escrow
   blob and the target wallet nullifiers to the enclave, which removes them and
   signs a fresh transition plus escrow blob. No wallet signatures, so a lost
   wallet is removable without it. The enclave refuses a blob/commitment
@@ -193,19 +200,20 @@ This repo uses OpenSpec (skills in `.agents/skills/openspec-*`, root at
 
 ## Active work
 
-- `openspec/changes/integration-product/` — wiring tee into the Next.js frontend
-  and NestJS backend. Current scope: four-tier identity mapping, `topAssets`
-  disclosure, email accounts, encrypted address escrow with hourly recheck,
-  and a tier + top-3 profile. Phase 0 packaging/nonce work is done; protocol
-  additions, backend branch, and frontend branch remain. Resume at its
-  `tasks.md`; read `## Blockers` first (dev gates resolved; production gates
-  are KMS-bound escrow key and a mailer). App work goes on feature branches
-  only, never `main` of either app repo.
-- `openspec/changes/harden-phase-3/` — leftover audit hardening (blind OPRF,
-  signed price feed, threshold transitions, HA runbook). All tasks pending;
-  do not start until integration Phase 0 ships. Its `## Blockers` lists the
-  KMS, feed-vendor, review, and infra dependencies.
-- Archived: `harden-verification-and-limits` and `harden-phase-2` (both 19/19,
-  82/82 tests) moved to `openspec/changes/archive/` on 2026-10-01; their
-  deltas are now the baseline in `openspec/specs/`. Changes whose deltas say
-  ADDED against these capabilities must use MODIFIED/ADDED against the specs.
+- `openspec/changes/wallet-first-auth/` — reconcile the wallet-first auth that
+  shipped in the app repos (`6FIGS.XYZ_backend` `335cc5c`, `6FIGS.XYZ_frontend`
+  `e03dc2c`: email removed, sessionless `tee-login`/`tee-identify`, opt-in
+  username credentials, recovery with any enrolled wallet) and finish the
+  remaining work: Reown AppKit (EVM + Solana) in the frontend, the wallet-set
+  completion prompt, and legacy `Wallet`/mailer cleanup. Resume at its
+  `tasks.md`. App work goes on feature branches only, never `main` of either
+  app repo.
+- `openspec/changes/enclave-https-lb/` — HTTPS load balancer for the enclave;
+  code done, LB/DNS provisioning pending.
+- `openspec/changes/kms-nullifier-key/` — KMS-wrapped nullifier key; code and
+  provisioning done, one HTTPS verification pending.
+- Archived on 2026-10-08: `session-wallet-removal` (tee, backend, and frontend
+  shipped; its capability is now baseline in `openspec/specs/`). Older work
+  (`integration-product`, `integration-followups`,
+  `pricing-and-threshold-removal`, the harden series) is in
+  `openspec/changes/archive/`.
