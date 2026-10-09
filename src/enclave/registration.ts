@@ -57,7 +57,7 @@ import {
 } from "./balances.ts";
 import { RpcDisagreementError } from "./rpc.ts";
 import { discoverSolanaBalances } from "./solana.ts";
-import { categoryForPrice, type PricingProvider } from "./pricing.ts";
+import { categoryForPrice, priceKey, quoteAll, type PricingProvider } from "./pricing.ts";
 
 const REQUEST_MAX_AGE_MS = 120_000;
 const MAX_WALLETS = 20;
@@ -789,11 +789,14 @@ async function valueBalances(
 ): Promise<ValuedBalances> {
   const positions: CategorizedPosition[] = [];
   const holdings: ValuedHolding[] = [];
+  // One batched pass instead of a round trip per asset; unpriceable assets
+  // are skipped, per product spec.
+  const quotes = await quoteAll(pricing, rawBalances);
   for (const balance of rawBalances) {
     if (Date.now() > deadline) {
       throw new RegistrationError("budget_exceeded", "registration exceeded its time budget");
     }
-    const quote = await pricing.quote(balance);
+    const quote = quotes.get(priceKey(balance));
     if (!quote) continue;
     const value = valueMicroUsd(balance.balanceRaw, quote.priceMicroUsd, balance.decimals);
     if (value === null || value <= 0n) continue;
