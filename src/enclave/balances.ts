@@ -4,7 +4,7 @@ import {
   type ChainConfig,
 } from "../shared/constants.ts";
 import { hexToBytes } from "../shared/crypto.ts";
-import { jsonRpc, RpcDisagreementError } from "./rpc.ts";
+import { jsonRpc, mapLimit, RpcDisagreementError } from "./rpc.ts";
 
 export interface EvmRpcConfig {
   chain: ChainConfig;
@@ -89,26 +89,38 @@ function decodeString(hex: string): string | null {
  * discovery has to enumerate holdings: provider token-balance enumeration when
  * the RPC supports it, otherwise Transfer-log scanning fallback. balanceOf is
  * then read for every unique contract.
+ *
+ * Chains resolve concurrently and token reads fan out with bounded
+ * parallelism; results merge in configured chain order with discovery order
+ * preserved inside each chain, so the asset budget truncates deterministically
+ * — identical results to sequential collection, fewer round trips. Native
+ * disagreement still throws; every other failure still skips, per read.
  */
 export async function discoverEvmBalances(
   address: string,
   rpcs: EvmRpcConfig[],
   maxBalances: number = MAX_ASSETS_PER_REQUEST,
 ): Promise<RawBalance[]> {
-  const balances: RawBalance[] = [];
   const lowerAddress = address.toLowerCase();
-
-  for (const { chain, rpcUrl, secondaryRpcUrl } of rpcs) {
-    if (balances.length >= maxBalances) break;
+  const perChain = await mapLimit(rpcs, 6, async ({ chain, rpcUrl, secondaryRpcUrl }) => {
+    const out: RawBalance[] = [];
     const native = await safeNativeBalance(address, chain, rpcUrl, secondaryRpcUrl);
-    if (native) balances.push(native);
+    if (native) out.push(native);
 
     const tokenAddresses = await discoverErc20Contracts(lowerAddress, rpcUrl);
-
-    for (const token of tokenAddresses) {
-      if (balances.length >= maxBalances) break;
-      const balance = await readErc20(address, token, chain, rpcUrl, secondaryRpcUrl);
-      if (balance && balance.balanceRaw > 0n) balances.push(balance);
+    const reads = await mapLimit([...tokenAddresses], 10, (token) =>
+      readErc20(address, token, chain, rpcUrl, secondaryRpcUrl),
+    );
+    for (const balance of reads) {
+      if (balance && balance.balanceRaw > 0n) out.push(balance);
+    }
+    return out;
+  });
+  const balances: RawBalance[] = [];
+  for (const chainBalances of perChain) {
+    for (const b of chainBalances) {
+      if (balances.length >= maxBalances) return balances;
+      balances.push(b);
     }
   }
   return balances;

@@ -301,7 +301,7 @@ test("quoteAll fans out providers without batching support", async () => {
 });
 
 test("mapLimit preserves order under concurrency", async () => {
-  const { mapLimit } = await import("../src/enclave/pricing.ts");
+  const { mapLimit } = await import("../src/enclave/rpc.ts");
   const out = await mapLimit([3, 1, 2], 2, async (n) => {
     await new Promise((r) => setTimeout(r, (4 - n) * 5));
     return n * 10;

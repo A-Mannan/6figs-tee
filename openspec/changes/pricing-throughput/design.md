@@ -30,3 +30,14 @@ entries are unchanged.
 `valueBalances` calls `quoteAll(pricing, balances)`: batching providers take
 the fast path, others (StaticPricing in dev/tests) fan out with the same
 concurrency cap. Deadline and budget checks still gate every asset.
+
+## Balance discovery parallelism
+
+Chains resolve concurrently per wallet and token reads fan out (10 in
+flight); results merge in configured chain order with discovery order
+preserved, so the asset budget truncates deterministically — identical
+balances to sequential collection. Native disagreement still throws;
+every other failure still skips, per read. Wallets stay sequential so the
+cross-wallet budget keeps its exact semantics. Fallback providers stay
+sequential per asset (the spec reads "and then", and misses are now cached,
+so the miss path costs calls once per TTL).

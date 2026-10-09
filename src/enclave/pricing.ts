@@ -5,7 +5,7 @@ import {
   VALUE_SCALE,
   type ChainConfig,
 } from "../shared/constants.ts";
-import { getJson } from "./rpc.ts";
+import { getJson, mapLimit } from "./rpc.ts";
 import type { RawBalance } from "./balances.ts";
 
 export interface PriceQuote {
@@ -29,31 +29,6 @@ export function priceKey(
   balance: Pick<RawBalance, "family" | "chainId" | "asset">,
 ): string {
   return `${balance.family}:${balance.chainId}:${balance.asset.toLowerCase()}`;
-}
-
-/**
- * Bounded-parallel fan-out preserving input order. Independent provider
- * calls run concurrently instead of serially; the limit keeps one
- * registration from hammering an API with hundreds of in-flight requests.
- */
-export async function mapLimit<T, R>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const out = new Array<R>(items.length);
-  let next = 0;
-  const workers = Array.from(
-    { length: Math.max(1, Math.min(limit, items.length)) },
-    async () => {
-      while (next < items.length) {
-        const i = next++;
-        out[i] = await fn(items[i]!);
-      }
-    },
-  );
-  await Promise.all(workers);
-  return out;
 }
 
 /**
