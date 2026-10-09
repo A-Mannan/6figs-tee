@@ -9,6 +9,31 @@ export class RpcError extends Error {}
  */
 export class RpcDisagreementError extends Error {}
 
+/**
+ * Bounded-parallel fan-out preserving input order. Independent provider
+ * calls run concurrently instead of serially; the limit keeps one
+ * registration from hammering an API with hundreds of in-flight requests.
+ */
+export async function mapLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      while (next < items.length) {
+        const i = next++;
+        out[i] = await fn(items[i]!);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return out;
+}
+
 let nextId = 1;
 
 export async function jsonRpc<T>(
