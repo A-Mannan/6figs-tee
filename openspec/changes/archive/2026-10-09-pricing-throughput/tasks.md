@@ -12,4 +12,4 @@
 - [x] Tests: merge order under concurrency, deterministic cap truncation, disagreement propagation (EVM + Solana)
 - [x] Full suite green (145/145) + `tsc --noEmit` clean
 - [x] Benchmark: 2-chain + Solana wallet, 40ms/RPC stub — 1480ms serialized vs 356ms parallel (4.2x), identical balances
-- [ ] Rebuild the enclave image (`scripts/build-image.sh`), pin the new digest in backend (`SIXFIGS_IMAGE_DIGEST`) and frontend (`NEXT_PUBLIC_IMAGE_DIGEST`), redeploy (`scripts/create-vm.sh`)
+- [x] Rebuild + deploy (2026-10-09): image `sha256:95261f8a550b886bb0d3c523fd9e569ad3f3091fb56bdaabd88e8c990cd88261` built with `scripts/build-image-dev.sh`, WIF provider condition rotated to it (KMS release gates on the exact image), VM metadata `tee-image-reference` updated + reset, backend and frontend digest pins updated (both, staged). Live `/hello` attestation claims the new digest; `/healthz` green.

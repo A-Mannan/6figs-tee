@@ -31,8 +31,9 @@
   four `SIXFIGS_KMS_*` values, `SIXFIGS_TRUST_PROXY=1`, wildcard origin),
   remove public `:8080`, reset the VM; verified by direct `/healthz` and
   `/hello` reporting `escrowKeyProvider: kms`, `nullifierScheme: keyed-v1`
-- [ ] 2.5 Verify `https://tee.6figs.xyz/healthz` once the Namecheap A record
-  resolves and the managed certificate is ACTIVE
+- [x] 2.5 Verify `https://tee.6figs.xyz/healthz` once the Namecheap A record
+  resolves and the managed certificate is ACTIVE (verified 2026-10-09:
+  `{"ok":true,"policyVersion":"6figs-tee-2026-10-e","provider":"confidential-space"}`)
 
 ## Verification commands
 
