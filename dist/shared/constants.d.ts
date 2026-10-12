@@ -6,7 +6,7 @@
 /** USD values are carried as integer micro-dollars (1e-6 USD) to avoid floats. */
 export declare const VALUE_SCALE = 1000000n;
 export interface TierDefinition {
-    /** 0 means "below the first threshold" (not admitted). */
+    /** 0 is TIER 0: below the first threshold but admitted with lowest access. */
     readonly id: number;
     readonly label: string;
     /** Minimum inclusive portfolio value in micro-USD. */
@@ -33,7 +33,7 @@ export declare const MAX_WALLET_LABEL = 32;
 /** Allocation categories used for category-level disclosure. */
 export declare const ALLOCATION_CATEGORIES: readonly ["stable", "majors", "altcoins", "other"];
 export type AllocationCategory = (typeof ALLOCATION_CATEGORIES)[number];
-export declare const POLICY_VERSION = "6figs-tee-2026-10-e";
+export declare const POLICY_VERSION = "6figs-tee-2026-10-f";
 /** Domain-separation tags. Changing any of these breaks all existing nullifiers. */
 export declare const DOMAIN: {
     readonly identity: "6figs-identity-v2";

@@ -1,4 +1,6 @@
 export function productTierLabel(teeTierId) {
+    if (teeTierId === 0)
+        return "0";
     if (teeTierId === 1)
         return "I";
     if (teeTierId === 2)

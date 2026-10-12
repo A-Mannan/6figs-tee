@@ -36,8 +36,12 @@ export function nextTierFloor(tierId, tiers = TIERS) {
 /** Coarse band string. Never reveals the exact total. */
 export function portfolioBand(totalMicroUsd, tiers = TIERS) {
     const band = assignTier(totalMicroUsd, tiers);
-    if (band.id === 0)
-        return "<100k";
+    if (band.id === 0) {
+        const next = nextTierFloor(band.id, tiers);
+        if (next === 0n)
+            return "<100k";
+        return `<${short(next)}`;
+    }
     const next = nextTierFloor(band.id, tiers);
     if (next === 0n)
         return "1m+";

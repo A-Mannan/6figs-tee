@@ -8,7 +8,7 @@
 export const VALUE_SCALE = 1_000_000n;
 
 export interface TierDefinition {
-  /** 0 means "below the first threshold" (not admitted). */
+  /** 0 is TIER 0: below the first threshold but admitted with lowest access. */
   readonly id: number;
   readonly label: string;
   /** Minimum inclusive portfolio value in micro-USD. */
@@ -21,7 +21,7 @@ export interface TierDefinition {
  * the band, so a lower-bound tier leaks at most one bit of bucket membership.
  */
 export const TIERS: readonly TierDefinition[] = [
-  { id: 0, label: "none", minMicroUsd: 0n },
+  { id: 0, label: "$0+", minMicroUsd: 0n },
   { id: 1, label: "$100k+", minMicroUsd: 100_000n * VALUE_SCALE },
   { id: 2, label: "$300k+", minMicroUsd: 300_000n * VALUE_SCALE },
   { id: 3, label: "$500k+", minMicroUsd: 500_000n * VALUE_SCALE },
@@ -34,7 +34,7 @@ export const TIERS: readonly TierDefinition[] = [
  * real tiers through the same code path. Never used in production.
  */
 export const DEV_TIERS: readonly TierDefinition[] = [
-  { id: 0, label: "none", minMicroUsd: 0n },
+  { id: 0, label: "$0+", minMicroUsd: 0n },
   { id: 1, label: "$10+", minMicroUsd: 10n * VALUE_SCALE },
   { id: 2, label: "$100+", minMicroUsd: 100n * VALUE_SCALE },
   { id: 3, label: "$500+", minMicroUsd: 500n * VALUE_SCALE },
@@ -55,7 +55,7 @@ export const MAX_WALLET_LABEL = 32;
 export const ALLOCATION_CATEGORIES = ["stable", "majors", "altcoins", "other"] as const;
 export type AllocationCategory = (typeof ALLOCATION_CATEGORIES)[number];
 
-export const POLICY_VERSION = "6figs-tee-2026-10-e";
+export const POLICY_VERSION = "6figs-tee-2026-10-f";
 
 /** Domain-separation tags. Changing any of these breaks all existing nullifiers. */
 export const DOMAIN = {

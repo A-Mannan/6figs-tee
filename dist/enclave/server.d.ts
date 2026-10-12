@@ -3,7 +3,7 @@ import { type AttestationProvider } from "./attestation-provider.ts";
 import { EnclaveKeyManager } from "./keys.ts";
 import type { EscrowKeyProvider } from "./key-provider.ts";
 import { type NullifierScheme } from "../shared/nullifiers.ts";
-import { type PricingProvider } from "./pricing.ts";
+import { StaticPricing, type PricingProvider } from "./pricing.ts";
 export interface EnclaveServerOptions {
     env?: NodeJS.ProcessEnv;
     attestation?: AttestationProvider;
@@ -18,7 +18,7 @@ export declare function createEnclaveServer(options?: EnclaveServerOptions): {
     keyManager: EnclaveKeyManager;
     nullifier: NullifierScheme;
     attestation: AttestationProvider;
-    pricing: PricingProvider;
+    pricing: PricingProvider | StaticPricing;
     listen(): Promise<{
         port: number;
         host: string;

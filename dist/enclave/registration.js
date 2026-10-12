@@ -8,7 +8,7 @@ import { verifyOwnership, verifyWalletSignature } from "./ownership.js";
 import { discoverEvmBalances, evmRpcsFromEnv, httpsUrl, } from "./balances.js";
 import { RpcDisagreementError } from "./rpc.js";
 import { discoverSolanaBalances } from "./solana.js";
-import { categoryForPrice } from "./pricing.js";
+import { categoryForPrice, priceKey, quoteAll } from "./pricing.js";
 const REQUEST_MAX_AGE_MS = 120_000;
 const MAX_WALLETS = 20;
 const RESULT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -560,11 +560,14 @@ function withLabels(wallets) {
 async function valueBalances(rawBalances, pricing, deadline) {
     const positions = [];
     const holdings = [];
+    // One batched pass instead of a round trip per asset; unpriceable assets
+    // are skipped, per product spec.
+    const quotes = await quoteAll(pricing, rawBalances);
     for (const balance of rawBalances) {
         if (Date.now() > deadline) {
             throw new RegistrationError("budget_exceeded", "registration exceeded its time budget");
         }
-        const quote = await pricing.quote(balance);
+        const quote = quotes.get(priceKey(balance));
         if (!quote)
             continue;
         const value = valueMicroUsd(balance.balanceRaw, quote.priceMicroUsd, balance.decimals);

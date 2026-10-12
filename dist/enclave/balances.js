@@ -1,6 +1,6 @@
 import { activeChains, MAX_ASSETS_PER_REQUEST, } from "../shared/constants.js";
 import { hexToBytes } from "../shared/crypto.js";
-import { jsonRpc, RpcDisagreementError } from "./rpc.js";
+import { jsonRpc, mapLimit, RpcDisagreementError } from "./rpc.js";
 /** Plaintext RPC would let a network observer read and rewrite balance reads. */
 export function httpsUrl(url) {
     return url !== undefined && url.startsWith("https://") ? url : undefined;
@@ -64,23 +64,34 @@ function decodeString(hex) {
  * discovery has to enumerate holdings: provider token-balance enumeration when
  * the RPC supports it, otherwise Transfer-log scanning fallback. balanceOf is
  * then read for every unique contract.
+ *
+ * Chains resolve concurrently and token reads fan out with bounded
+ * parallelism; results merge in configured chain order with discovery order
+ * preserved inside each chain, so the asset budget truncates deterministically
+ * — identical results to sequential collection, fewer round trips. Native
+ * disagreement still throws; every other failure still skips, per read.
  */
 export async function discoverEvmBalances(address, rpcs, maxBalances = MAX_ASSETS_PER_REQUEST) {
-    const balances = [];
     const lowerAddress = address.toLowerCase();
-    for (const { chain, rpcUrl, secondaryRpcUrl } of rpcs) {
-        if (balances.length >= maxBalances)
-            break;
+    const perChain = await mapLimit(rpcs, 6, async ({ chain, rpcUrl, secondaryRpcUrl }) => {
+        const out = [];
         const native = await safeNativeBalance(address, chain, rpcUrl, secondaryRpcUrl);
         if (native)
-            balances.push(native);
+            out.push(native);
         const tokenAddresses = await discoverErc20Contracts(lowerAddress, rpcUrl);
-        for (const token of tokenAddresses) {
-            if (balances.length >= maxBalances)
-                break;
-            const balance = await readErc20(address, token, chain, rpcUrl, secondaryRpcUrl);
+        const reads = await mapLimit([...tokenAddresses], 10, (token) => readErc20(address, token, chain, rpcUrl, secondaryRpcUrl));
+        for (const balance of reads) {
             if (balance && balance.balanceRaw > 0n)
-                balances.push(balance);
+                out.push(balance);
+        }
+        return out;
+    });
+    const balances = [];
+    for (const chainBalances of perChain) {
+        for (const b of chainBalances) {
+            if (balances.length >= maxBalances)
+                return balances;
+            balances.push(b);
         }
     }
     return balances;

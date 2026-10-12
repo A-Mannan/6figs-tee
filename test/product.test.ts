@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { productTierLabel } from "../src/shared/product.ts";
 
 test("productTierLabel maps tee tiers to product labels one-to-one", () => {
-  assert.equal(productTierLabel(0), null);
+  assert.equal(productTierLabel(0), "0");
   assert.equal(productTierLabel(1), "I");
   assert.equal(productTierLabel(2), "II");
   assert.equal(productTierLabel(3), "III");

@@ -92,6 +92,20 @@ function deps(prices: Record<string, number> = {}) {
   };
 }
 
+function zeroBalanceDeps() {
+  const attestation = new MockAttestationProvider({});
+  const keys = new EnclaveKeyManager(attestation, LEGACY_NULLIFIER_SCHEME, {});
+  return {
+    keys: keys.keys,
+    attestation,
+    pricing: new StaticPricing({}, Number(process.env.TEST_ETH ?? 2500)),
+    nullifier: LEGACY_NULLIFIER_SCHEME,
+    // No RPC endpoints and no dev balances: discovery values nothing, which
+    // is the sub-$100k wallet the tier-0 admission path exists for.
+    env: {} as NodeJS.ProcessEnv,
+  };
+}
+
 test("registerPortfolio verifies EVM ownership and produces a signed result", async () => {
   const { wallet, privateKey } = evmWallet();
   const request = buildRequest([wallet]);
@@ -164,6 +178,33 @@ test("registerPortfolio rejects stale requests and duplicate wallets", async () 
   await assert.rejects(
     () => registerPortfolio(duplicate, deps()),
     (error: unknown) => error instanceof RegistrationError && error.code === "duplicate_wallet",
+  );
+});
+
+test("a portfolio below the first threshold is admitted as tier 0", async () => {
+  const { wallet, privateKey } = evmWallet();
+  const request = buildRequest([wallet]);
+  const nullifier = identityFor(request.wallets);
+  wallet.signature = signEvm(
+    privateKey,
+    ownershipChallenge({
+      identityNullifier: nullifier,
+      wallets: request.wallets,
+      timestamp: request.timestamp,
+      nonce: request.nonce,
+    }),
+  );
+
+  const signed = await registerPortfolio(request, zeroBalanceDeps());
+  assert.equal(signed.body.tier, 0);
+  assert.equal(signed.body.tierLabel, "$0+");
+  assert.equal(signed.body.tierFloorMicroUsd, "0");
+  assert.equal(signed.body.nextTierFloorMicroUsd, (100_000n * 1_000_000n).toString());
+  assert.equal(signed.body.portfolioBand, "<100k");
+  assert.deepEqual(signed.body.topAssets, []);
+  assert.equal(
+    verifyResultSignature(signed.enclavePublicKey, canonicalJson(signed.body), signed.signature),
+    true,
   );
 });
 

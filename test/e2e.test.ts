@@ -583,6 +583,54 @@ test("escrow recheck round trip through HTTP", async () => {
   assert.equal(mismatch?.code, "identity_mismatch");
 });
 
+test("a sub-$100k wallet is admitted as tier 0 through the full path", async () => {
+  // No RPC endpoints and no dev balances: discovery values nothing, so the
+  // enclave assigns tier 0 — the admitted floor for proven wallets below the
+  // first threshold.
+  const app = createEnclaveServer({
+    env: { SIXFIGS_MOCK_ATTESTATION: "1", NODE_ENV: "test" } as NodeJS.ProcessEnv,
+    attestation: new MockAttestationProvider({}),
+    pricing: new StaticPricing({}, 3000),
+    port: 0,
+  });
+  const { port } = await app.listen();
+  after(() => app.server.close());
+
+  const client = new RegistrationClient({
+    enclaveUrl: `http://127.0.0.1:${port}`,
+    policy: { allowMock: true },
+    fetchImpl: fetch,
+  });
+
+  const alice = evmAccount();
+  const keys = new Map([[alice.address.toLowerCase(), alice.privateKey]]);
+  const prepared = client.prepare({
+    wallets: [{ family: "evm" as const, chainId: 1, address: alice.address }],
+    disclosure: "hidden",
+  });
+  const signed = await client.submit({ prepared, signatures: signAll(prepared, keys) });
+
+  assert.equal(signed.body.tier, 0);
+  assert.equal(signed.body.tierLabel, "$0+");
+  assert.equal(signed.body.portfolioBand, "<100k");
+
+  const service = new RegistrationService({
+    verifier: new AttestationVerifier({
+      audience: "6figs-registration",
+      allowMock: true,
+      policy: {
+        allowedImageDigests: [],
+        allowedProjects: [],
+        allowedNullifierSchemes: ["legacy-v1"],
+      },
+    }),
+    store: new InMemoryNullifierStore(),
+  });
+  const record = await service.submit(signed, { requestNonce: prepared.nonce });
+  assert.equal(record.tier, 0);
+  assert.equal(record.tierLabel, "$0+");
+});
+
 test("CORS origin is emitted only when configured, wildcard included", async () => {
   const withWildcard = createEnclaveServer({
     env: {

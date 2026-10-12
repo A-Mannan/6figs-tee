@@ -116,7 +116,8 @@ address; username credentials and sessions live in the app repos.
 
 ## Protocol constants
 
-- Tiers: `$100k+`, `$300k+`, `$500k+`, `$1M+` (plus `none`). Lower-bound
+- Tiers: `$0+` (TIER 0, below $100k, admitted at the lowest access level),
+  `$100k+`, `$300k+`, `$500k+`, `$1M+`. Lower-bound
   assignment. Defined in `src/shared/constants.ts`.
 - `POLICY_VERSION` is committed into every signed result and checked by the
   verifier. Bump it when the protocol changes.

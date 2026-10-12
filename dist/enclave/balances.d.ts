@@ -28,5 +28,11 @@ export declare function evmRpcsFromEnv(env?: NodeJS.ProcessEnv): EvmRpcConfig[];
  * discovery has to enumerate holdings: provider token-balance enumeration when
  * the RPC supports it, otherwise Transfer-log scanning fallback. balanceOf is
  * then read for every unique contract.
+ *
+ * Chains resolve concurrently and token reads fan out with bounded
+ * parallelism; results merge in configured chain order with discovery order
+ * preserved inside each chain, so the asset budget truncates deterministically
+ * — identical results to sequential collection, fewer round trips. Native
+ * disagreement still throws; every other failure still skips, per read.
  */
 export declare function discoverEvmBalances(address: string, rpcs: EvmRpcConfig[], maxBalances?: number): Promise<RawBalance[]>;

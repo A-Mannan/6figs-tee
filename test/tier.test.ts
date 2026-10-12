@@ -91,6 +91,10 @@ test("portfolioBand is coarse", () => {
   assert.equal(portfolioBand(2_000_000n * USD), "1m+");
 });
 
+test("portfolioBand for tier 0 tracks the active tier set", () => {
+  assert.equal(portfolioBand(5n * USD, DEV_TIERS), "<10");
+});
+
 test("allocation sums to 10000 bps", () => {
   const { allocation, totalMicroUsd } = computeAllocation([
     { category: "stable", valueMicroUsd: 50_000n * USD },

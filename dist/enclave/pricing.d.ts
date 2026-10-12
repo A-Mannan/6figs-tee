@@ -7,7 +7,20 @@ export interface PriceQuote {
 }
 export interface PricingProvider {
     quote(balance: RawBalance): Promise<PriceQuote | null>;
+    /**
+     * Batched variant. Providers without one are fanned out by quoteAll with
+     * bounded parallelism; results are keyed by priceKey, null when unpriceable.
+     */
+    quoteMany?(balances: readonly RawBalance[]): Promise<Map<string, PriceQuote | null>>;
 }
+/** Canonical per-asset key shared by batching, caches, and result maps. */
+export declare function priceKey(balance: Pick<RawBalance, "family" | "chainId" | "asset">): string;
+/**
+ * Quote every balance. Batching providers resolve in a handful of grouped
+ * calls; the rest fan out with bounded parallelism. Either way the caller
+ * gets one map lookup per asset instead of N sequential round trips.
+ */
+export declare function quoteAll(pricing: PricingProvider, balances: readonly RawBalance[], concurrency?: number): Promise<Map<string, PriceQuote | null>>;
 /** Dollar-range assets are treated as par and capped at $1.00. */
 export declare function isParStable(priceMicroUsd: bigint): boolean;
 /**
@@ -15,7 +28,12 @@ export declare function isParStable(priceMicroUsd: bigint): boolean;
  * ERC-20/SPL tokens via /simple/token_price/{platform} by contract address.
  * There is no token allowlist: every discovered asset is quoted, and any asset
  * the API cannot price is skipped rather than valued at a guess.
- * Requests are cached per instance for a short TTL to stay within rate limits.
+ *
+ * Requests are batched by platform (one call per chain group plus one for
+ * natives) instead of one call per asset: fewer round trips for the same
+ * data, and proportionally less pressure on the API's rate limit. Results —
+ * hits and misses alike — are cached per instance for a short TTL, so repeat
+ * proves and rechecks within the window cost no provider calls at all.
  */
 export declare class CoinGeckoPricing implements PricingProvider {
     private readonly cache;
@@ -31,7 +49,13 @@ export declare class CoinGeckoPricing implements PricingProvider {
         devChains?: boolean;
     });
     quote(balance: RawBalance): Promise<PriceQuote | null>;
-    private fetchQuote;
+    quoteMany(balances: readonly RawBalance[]): Promise<Map<string, PriceQuote | null>>;
+    /** One grouped call per platform plus one for natives; chunk failures fall
+     * back to the original per-asset calls, preserving their exact semantics
+     * (native failures throw, token failures flow to the fallback chain). */
+    private fetchBatches;
+    private fetchNativeBatch;
+    private fetchTokenBatch;
     private nativeQuote;
     private tokenQuote;
 }
