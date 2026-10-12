@@ -1,12 +1,11 @@
 # Tasks: tier-zero-admission
 
-> Resume here. Tee-side code and both app working trees carry the change and are
-> verified locally; what remains is the release rail (tag + dist, dep pins,
-> image rebuild, PRs). App work goes on feature branches only — never push to
-> `main` of `6FIGS.XYZ_backend` or `6FIGS.XYZ_frontend`. Note for the merge:
-> the backend bot commit (`2c88438`, on `origin/main`) sets the TIER I
-> threshold to $0 as a workaround; this change supersedes it — TIER I returns
-> to $100k and tier 0 carries the floor.
+> Resume here. Everything through the live rollout is done and verified
+> (release tag, app dep bumps, enclave rotation on policy `-f`, live tier-0
+> proof). What remains is operator-side: reconcile with the backend bot rail on
+> `origin/main` (1.7 — drop the TIER I-at-$0 threshold hack there) and cut the
+> two app-repo PRs (3.4 — the working trees carry unrelated in-progress work
+> on diverged branches, so commits are left to the owner).
 
 ## 0. Tee (this repo)
 
@@ -23,7 +22,7 @@
 - [x] 1.3 Room gates: `VALID_TIERS` adds `TIER 0`; play gate copy "Verify your wallets in Profile first"
 - [x] 1.4 `SIXFIGS_EXPECTED_POLICY_VERSION=6figs-tee-2026-10-f` in `.env`
 - [x] 1.5 Verified: `npm run typecheck` + `npm run lint` green (two pre-existing lint errors removed: unused `randomBytes` import, unused `removed` destructure)
-- [ ] 1.6 Bump the `@sixfigs/tee` dep to the new release tag + install (after 3.1)
+- [x] 1.6 `@sixfigs/tee` bumped to `github:A-Mannan/6figs-tee#tee-2026-10-12`; `yarn install` resolved (lock pins commit d826124), typecheck/lint/build green, backend restarted and serving five tiers
 - [ ] 1.7 Reconcile with the bot rail on `origin/main`: drop the TIER I-at-$0 threshold hack, keep this change's thresholds, merge the bot copy into the branch that ships
 
 ## 2. Frontend (`6FIGS.XYZ_frontend`, current branch)
@@ -32,11 +31,11 @@
 - [x] 2.2 Create page offers TIER 0 for tier-0 holders and snaps the default within their ceiling; rooms filter adds "Tier 0 only"
 - [x] 2.3 Play copy: "prove your wallets" replaces the tier-bar framing; docs ladder and band diagram describe five tiers
 - [x] 2.4 Verified: `npm run typecheck` + `npm run lint` green (no frontend test runner exists)
-- [ ] 2.5 Bump the `@sixfigs/tee` dep to the new release tag + install (after 3.1)
+- [x] 2.5 `@sixfigs/tee` bumped to `github:A-Mannan/6figs-tee#tee-2026-10-12`; `yarn install` resolved, typecheck/lint green
 
 ## 3. Release and rollout
 
-- [ ] 3.1 Tee release: `npm run build`, `git add -f dist`, commit, tag, push (process in `docs/INTEGRATION.md`)
-- [ ] 3.2 Rebuild the enclave image under `6figs-tee-2026-10-f`; pin the new digest in backend `SIXFIGS_IMAGE_DIGEST` and the frontend enclave policy; roll the VM (image-rotation runbook)
-- [ ] 3.3 Regenerate a tier-0 proof against the dev enclave end-to-end (login → profile shows `TIER 0` → take a seat → room create offers TIER 0), as the browser-level verification
-- [ ] 3.4 PRs for both app branches: state tier-0 admission, the policy-version bump, and the room-gating semantics (base `main`, head the working branch)
+- [x] 3.1 Tee release (2026-10-12): commit `d826124` pushed to `main`, tag `tee-2026-10-12` pushed; `dist/` rebuilt and committed; 148/148 tests + `tsc` clean
+- [x] 3.2 Enclave rotated (2026-10-12): image `sha256:656d1a9630717d8557ef5d3d1ba18859c38eaa736bbb76df5a0350648da2aa3d` built with `scripts/build-image-dev.sh`, preflighted locally, KMS gate (WIF provider condition — found absent, re-added) pinned to it, VM `sixfigs-enclave-dev` metadata updated + reset; live `/hello` attests the new digest with `escrowKeyProvider: kms`, `policyVersion: 6figs-tee-2026-10-f`. App pins set to `new, 95261f8a` (rollback), orphan `9805c99f` dropped; backend restarted
+- [x] 3.3 Live tier-0 proof: `scripts/tier0-proof.ts` (kept as the rotation check) — fresh wallet through `https://tee.6figs.xyz` with real attestation: tier 0, label `$0+`, band `<10`, no top assets, and the backend verifier config accepts the signed result
+- [ ] 3.4 PRs for both app branches: state tier-0 admission, the policy-version bump, and the room-gating semantics (base `main`, head the working branch); app-repo commits left to the operator — working trees carry unrelated in-progress work on diverged branches

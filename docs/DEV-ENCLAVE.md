@@ -137,14 +137,21 @@ node --experimental-strip-types scripts/smoke-enclave.ts \
   http://<IP>:8080 sha256:<digest> sixfigs solana
 ```
 
-Live instance (2026-10-01): `sixfigs-enclave-dev` in `us-east1-b`,
-`http://34.73.89.203:8080`, digest
-`sha256:2b5f840b2a009940f8a2ba7fdc0654dc8f2620a2542b851bec74cec5073fe232`.
-This VM still runs an early image (policy `6figs-tee-2026-10-a`), so the
-newer add/remove and pricing flows (current policy `6figs-tee-2026-10-d`) will
-fail against it. Rebuild and recreate the VM from the current `main` before
-dev-testing; then point the apps' expected policy version and digest at the new
-build. Local mock-enclave testing does not need the VM.
+Admission smoke for the floor tier — a fresh wallet proves as TIER 0 through
+the live enclave, then the result passes the backend's verifier config:
+
+```bash
+node --experimental-strip-types scripts/tier0-proof.ts
+```
+
+Live instance (rotated 2026-10-12): `sixfigs-enclave-dev` in `us-east1-b`,
+behind the HTTPS load balancer at `https://tee.6figs.xyz`, digest
+`sha256:656d1a9630717d8557ef5d3d1ba18859c38eaa736bbb76df5a0350648da2aa3d`,
+policy `6figs-tee-2026-10-f` (TIER 0 admission). The KMS gate
+(workload-identity provider condition) pins this exact digest; the previous
+digest stays in the app pins for rollback. Rotations follow
+`docs/IMAGE-ROTATION.md` end to end: build, condition, VM metadata + reset,
+app pins, then `scripts/tier0-proof.ts` as the live check.
 Rebuilding the image changes the digest; recreating the VM may change the IP —
 re-pin both in app configs afterwards.
 
